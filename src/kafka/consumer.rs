@@ -8,6 +8,7 @@ use rdkafka::{
 
 use crate::alert::AlertMessage;
 use crate::edr_alert::EdrAlert;
+use crate::ngav_alert::NgavAlert;
 use super::config::KafkaConfig;
 
 pub struct KafkaConsumer {
@@ -56,6 +57,9 @@ impl KafkaConsumer {
                     } else if let Ok(edr_alert) = serde_json::from_str::<EdrAlert>(payload) {
                         info!("Received EDR alert: {} - {}", edr_alert.report_name, edr_alert.device_name);
                         self.process_edr_alert(edr_alert).await;
+                    } else if let Ok(ngav_alert) = serde_json::from_str::<NgavAlert>(payload) {
+                        info!("Received NGAV alert: {} - {}", ngav_alert.reason, ngav_alert.device_name);
+                        self.process_ngav_alert(ngav_alert).await;
                     } else {
                         error!("Error deserializing message - unknown format");
                     }
@@ -121,6 +125,63 @@ impl KafkaConsumer {
 
         if alert.is_critical() {
             info!("📧 Critical alert - triggering notifications for report: {}", alert.report_id);
+        }
+    }
+
+    async fn process_ngav_alert(&self, alert: NgavAlert) {
+        let severity_level = alert.get_severity_level();
+        let threat_summary = alert.get_threat_summary();
+        
+        match severity_level {
+            "critical" => {
+                error!("🚨 CRITICAL NGAV ALERT: {} | Device: {} | Process: {}", 
+                       threat_summary, alert.device_name, alert.process_name);
+                
+                if alert.has_mitre_ttps() {
+                    let ttps = alert.get_mitre_ttps();
+                    error!("🔴 MITRE ATT&CK TTPs detected: {:?}", ttps);
+                }
+            }
+            "high" => {
+                error!("🔴 HIGH SEVERITY NGAV ALERT: {} | Device: {} | Category: {}", 
+                       alert.reason, alert.device_name, alert.category);
+            }
+            "medium" => {
+                warn!("🟡 MEDIUM SEVERITY NGAV ALERT: {} | Device: {} | User: {}", 
+                      alert.reason, alert.device_name, alert.device_username);
+                      
+                if alert.has_mitre_ttps() {
+                    warn!("⚠️ MITRE TTPs: {:?}", alert.get_mitre_ttps());
+                }
+            }
+            "low" => {
+                info!("🟢 LOW SEVERITY NGAV ALERT: {} | Device: {} | Status: {}", 
+                      alert.reason, alert.device_name, alert.workflow.state);
+            }
+            _ => {
+                warn!("❓ UNKNOWN SEVERITY NGAV ALERT: {} | Severity: {}", 
+                      alert.reason, alert.severity);
+            }
+        }
+
+        if alert.is_malware() {
+            error!("🦠 MALWARE DETECTED: {} | Reputation: {}", 
+                   alert.threat_cause_actor_name, alert.threat_cause_reputation);
+        }
+
+        if alert.is_blocked() {
+            info!("🛡️ Threat blocked by policy: {}", alert.policy_name);
+        } else {
+            warn!("⚠️ Threat NOT blocked - Action may be required");
+        }
+
+        let affected_processes = alert.get_affected_processes();
+        if !affected_processes.is_empty() {
+            info!("📋 Affected processes: {:?}", affected_processes);
+        }
+
+        if alert.is_critical() || alert.is_malware() {
+            info!("📧 High-priority alert - triggering notifications for threat: {}", alert.threat_id);
         }
     }
 }

@@ -56,21 +56,36 @@ async fn main() -> Result<()> {
     // 等待一下让消费者启动
     tokio::time::sleep(Duration::from_secs(2)).await;
 
-    // 选择发送模式：示例告警或EDR数据
-    let edr_file_path = "atlasv2/data/attack/h1/cbc-edr-alerts/edr-alerts-h1-m1.jsonl";
+    // 选择发送模式：自动检测文件格式或示例告警
+    let file_paths = vec![
+        "atlasv2/data/attack/h1/cbc-edr-alerts/edr-alerts-h1-m1.jsonl",
+        "atlasv2/data/attack/h1/cbc-ngav-alerts/ngav-alerts-h1-m2.jsonl",
+    ];
     
-    if std::path::Path::new(edr_file_path).exists() {
-        info!("📊 Loading and sending EDR alerts from file...");
-        match producer.load_and_send_jsonl_file(edr_file_path).await {
-            Ok(count) => info!("✅ Successfully sent {} EDR alerts", count),
-            Err(e) => {
-                log::error!("Failed to load EDR file: {}", e);
-                info!("📤 Falling back to sample alerts...");
-                send_sample_alerts(&producer).await?;
+    let mut files_processed = false;
+    
+    for file_path in file_paths {
+        if std::path::Path::new(file_path).exists() {
+            info!("📊 Auto-detecting and loading alerts from: {}", file_path);
+            match producer.detect_and_load_file(file_path).await {
+                Ok(count) => {
+                    info!("✅ Successfully sent {} alerts from {}", count, file_path);
+                    files_processed = true;
+                }
+                Err(e) => {
+                    log::error!("Failed to load file {}: {}", file_path, e);
+                }
             }
+            
+            // 在文件之间等待一下
+            tokio::time::sleep(Duration::from_secs(2)).await;
+        } else {
+            info!("📂 File not found: {}", file_path);
         }
-    } else {
-        info!("📤 EDR file not found, sending sample alerts...");
+    }
+    
+    if !files_processed {
+        info!("📤 No alert files found, sending sample alerts...");
         send_sample_alerts(&producer).await?;
     }
 

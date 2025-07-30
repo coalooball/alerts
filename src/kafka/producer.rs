@@ -5,11 +5,12 @@ use rdkafka::{
     producer::{FutureProducer, FutureRecord},
 };
 use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read};
 use std::time::Duration;
 
 use crate::alert::AlertMessage;
 use crate::edr_alert::EdrAlert;
+use crate::ngav_alert::NgavAlert;
 use super::config::KafkaConfig;
 
 pub struct KafkaProducer {
@@ -138,6 +139,105 @@ impl KafkaProducer {
         info!("Successfully sent {} EDR alerts from {}", sent_count, file_path);
         Ok(sent_count)
     }
+
+    pub async fn send_ngav_alert(&self, alert: NgavAlert) -> Result<()> {
+        let json = serde_json::to_string(&alert)?;
+        let alert_key = alert.get_alert_key();
+        let record = FutureRecord::to(&self.config.topic)
+            .payload(json.as_bytes())
+            .key(&alert_key);
+
+        match self.producer.send(record, Duration::from_secs(5)).await {
+            Ok((partition, offset)) => {
+                info!(
+                    "NGAV Alert sent successfully to partition {} at offset {} [{}]",
+                    partition, offset, alert.reason
+                );
+                Ok(())
+            }
+            Err((e, _)) => {
+                error!("Failed to send NGAV alert: {}", e);
+                Err(anyhow::anyhow!("Failed to send NGAV alert: {}", e))
+            }
+        }
+    }
+
+    pub async fn send_ngav_batch(&self, alerts: Vec<NgavAlert>) -> Result<()> {
+        for alert in alerts {
+            if let Err(e) = self.send_ngav_alert(alert).await {
+                error!("Failed to send NGAV alert in batch: {}", e);
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        Ok(())
+    }
+
+    pub async fn load_and_send_ngav_file(&self, file_path: &str) -> Result<usize> {
+        info!("Loading NGAV alerts from: {}", file_path);
+        
+        let file = File::open(file_path)?;
+        let reader = BufReader::new(file);
+        
+        let mut sent_count = 0;
+        let mut batch = Vec::new();
+        const BATCH_SIZE: usize = 50;
+
+        for line in reader.lines() {
+            let line = line?;
+            if line.trim().is_empty() {
+                continue;
+            }
+
+            match serde_json::from_str::<NgavAlert>(&line) {
+                Ok(alert) => {
+                    batch.push(alert);
+                    
+                    if batch.len() >= BATCH_SIZE {
+                        self.send_ngav_batch(batch).await?;
+                        sent_count += BATCH_SIZE;
+                        batch = Vec::new();
+                        info!("Sent batch of {} NGAV alerts, total: {}", BATCH_SIZE, sent_count);
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to parse NGAV alert: {}", e);
+                }
+            }
+        }
+
+        if !batch.is_empty() {
+            let remaining = batch.len();
+            self.send_ngav_batch(batch).await?;
+            sent_count += remaining;
+            info!("Sent final batch of {} NGAV alerts", remaining);
+        }
+
+        info!("Successfully sent {} NGAV alerts from {}", sent_count, file_path);
+        Ok(sent_count)
+    }
+
+    pub async fn detect_and_load_file(&self, file_path: &str) -> Result<usize> {
+        info!("Auto-detecting file format for: {}", file_path);
+        
+        let file = File::open(file_path)?;
+        let mut reader = BufReader::new(file);
+        let mut first_line = String::new();
+        reader.read_line(&mut first_line)?;
+        
+        if first_line.trim().is_empty() {
+            return Err(anyhow::anyhow!("Empty file: {}", file_path));
+        }
+
+        if first_line.contains("\"schema\":") && first_line.contains("\"ioc_hit\":") {
+            info!("Detected EDR alert format");
+            self.load_and_send_jsonl_file(file_path).await
+        } else if first_line.contains("\"type\":\"CB_ANALYTICS\"") && first_line.contains("\"threat_indicators\":") {
+            info!("Detected NGAV alert format");
+            self.load_and_send_ngav_file(file_path).await
+        } else {
+            Err(anyhow::anyhow!("Unknown file format: {}", file_path))
+        }
+    }
 }
 
 #[cfg(test)]
@@ -250,6 +350,30 @@ mod tests {
         
         let alert_key = edr_alert.get_alert_key();
         assert_eq!(alert_key, "WIN-32-H1_test-report-123");
+        
+        Ok(())
+    }
+
+    #[test]
+    fn test_ngav_alert_parsing() -> Result<()> {
+        let json_data = r#"{"type":"CB_ANALYTICS","id":"test-id-123","legacy_alert_id":"test-legacy-id","org_key":"7DMF69PK","create_time":"2022-07-19T19:32:28Z","last_update_time":"2022-07-19T19:53:44Z","first_event_time":"2022-07-19T19:31:46Z","last_event_time":"2022-07-19T19:52:45Z","threat_id":"test-threat-id","severity":1,"category":"THREAT","device_id":98483951,"device_os":"WINDOWS","device_os_version":"Windows 10","device_name":"TEST-DEVICE","device_username":"test.user@example.com","policy_id":268058,"policy_name":"Test Policy","target_value":"HIGH","workflow":{"state":"OPEN","remediation":"","last_update_time":"2022-07-19T19:32:28Z","comment":"","changed_by":"Carbon Black"},"device_internal_ip":"192.168.1.100","device_external_ip":"1.2.3.4","alert_url":"https://test.com","reason":"Test malware detected","reason_code":"R_MALWARE","process_name":"malware.exe","device_location":"ONSITE","created_by_event_id":"test-event-id","threat_indicators":[{"process_name":"malware.exe","sha256":"testhash123","ttps":["MITRE_T1059","NETWORK_ACCESS"]}],"threat_cause_actor_sha256":"testhash123","threat_cause_actor_name":"malware.exe","threat_cause_actor_process_pid":"1234-567890","threat_cause_reputation":"MALWARE","threat_cause_threat_category":"MALWARE","threat_cause_vector":"WEB","threat_cause_cause_event_id":"test-cause-id","blocked_threat_category":"MALWARE","not_blocked_threat_category":"UNKNOWN","kill_chain_status":["INSTALL_RUN"],"run_state":"TERMINATED","policy_applied":"APPLIED"}"#;
+
+        let ngav_alert: crate::ngav_alert::NgavAlert = serde_json::from_str(json_data)?;
+        
+        assert_eq!(ngav_alert.device_name, "TEST-DEVICE");
+        assert_eq!(ngav_alert.severity, 1);
+        assert_eq!(ngav_alert.get_severity_level(), "critical");
+        assert_eq!(ngav_alert.reason, "Test malware detected");
+        assert!(ngav_alert.is_critical());
+        assert!(ngav_alert.is_malware());
+        assert!(ngav_alert.has_mitre_ttps());
+        assert!(ngav_alert.is_blocked());
+        
+        let alert_key = ngav_alert.get_alert_key();
+        assert_eq!(alert_key, "TEST-DEVICE_test-id-123");
+        
+        let ttps = ngav_alert.get_mitre_ttps();
+        assert!(ttps.contains(&"MITRE_T1059".to_string()));
         
         Ok(())
     }
