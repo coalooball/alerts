@@ -56,12 +56,26 @@ async fn main() -> Result<()> {
     // 等待一下让消费者启动
     tokio::time::sleep(Duration::from_secs(2)).await;
 
-    // 发送示例告警
-    info!("📤 Sending sample alerts...");
-    send_sample_alerts(&producer).await?;
+    // 选择发送模式：示例告警或EDR数据
+    let edr_file_path = "atlasv2/data/attack/h1/cbc-edr-alerts/edr-alerts-h1-m1.jsonl";
+    
+    if std::path::Path::new(edr_file_path).exists() {
+        info!("📊 Loading and sending EDR alerts from file...");
+        match producer.load_and_send_jsonl_file(edr_file_path).await {
+            Ok(count) => info!("✅ Successfully sent {} EDR alerts", count),
+            Err(e) => {
+                log::error!("Failed to load EDR file: {}", e);
+                info!("📤 Falling back to sample alerts...");
+                send_sample_alerts(&producer).await?;
+            }
+        }
+    } else {
+        info!("📤 EDR file not found, sending sample alerts...");
+        send_sample_alerts(&producer).await?;
+    }
 
     // 等待消费者处理消息
-    tokio::time::sleep(Duration::from_secs(5)).await;
+    tokio::time::sleep(Duration::from_secs(10)).await;
 
     info!("✅ Application completed successfully");
 

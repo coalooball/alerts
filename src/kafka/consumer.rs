@@ -7,6 +7,7 @@ use rdkafka::{
 };
 
 use crate::alert::AlertMessage;
+use crate::edr_alert::EdrAlert;
 use super::config::KafkaConfig;
 
 pub struct KafkaConsumer {
@@ -49,14 +50,14 @@ impl KafkaConsumer {
                         }
                     };
 
-                    match serde_json::from_str::<AlertMessage>(payload) {
-                        Ok(alert) => {
-                            info!("Received alert: {:?}", alert);
-                            self.process_alert(alert).await;
-                        }
-                        Err(e) => {
-                            error!("Error deserializing alert message: {}", e);
-                        }
+                    if let Ok(alert) = serde_json::from_str::<AlertMessage>(payload) {
+                        info!("Received simple alert: {:?}", alert);
+                        self.process_alert(alert).await;
+                    } else if let Ok(edr_alert) = serde_json::from_str::<EdrAlert>(payload) {
+                        info!("Received EDR alert: {} - {}", edr_alert.report_name, edr_alert.device_name);
+                        self.process_edr_alert(edr_alert).await;
+                    } else {
+                        error!("Error deserializing message - unknown format");
                     }
                 }
                 Err(e) => {
@@ -84,6 +85,42 @@ impl KafkaConsumer {
             _ => {
                 warn!("❓ Unknown alert level: {}", alert.level);
             }
+        }
+    }
+
+    async fn process_edr_alert(&self, alert: EdrAlert) {
+        let severity_level = alert.get_severity_level();
+        let process_info = alert.get_process_info();
+        
+        match severity_level {
+            "critical" => {
+                error!("🚨 CRITICAL EDR ALERT: {} | Device: {} | Process: {}", 
+                       alert.report_name, alert.device_name, process_info);
+                
+                if alert.contains_tag("attack") {
+                    error!("🔴 ATTACK DETECTED: Contains attack-related tags");
+                }
+            }
+            "high" => {
+                error!("🔴 HIGH SEVERITY EDR ALERT: {} | Device: {} | IOC: {}", 
+                       alert.report_name, alert.device_name, alert.ioc_hit);
+            }
+            "medium" => {
+                warn!("🟡 MEDIUM SEVERITY EDR ALERT: {} | Device: {} | User: {}", 
+                      alert.report_name, alert.device_name, alert.process_username);
+            }
+            "low" => {
+                info!("🟢 LOW SEVERITY EDR ALERT: {} | Device: {} | Tags: {:?}", 
+                      alert.report_name, alert.device_name, alert.report_tags);
+            }
+            _ => {
+                warn!("❓ UNKNOWN SEVERITY EDR ALERT: {} | Severity: {}", 
+                      alert.report_name, alert.severity);
+            }
+        }
+
+        if alert.is_critical() {
+            info!("📧 Critical alert - triggering notifications for report: {}", alert.report_id);
         }
     }
 }

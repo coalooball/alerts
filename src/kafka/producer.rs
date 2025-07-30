@@ -4,9 +4,12 @@ use rdkafka::{
     config::{ClientConfig, FromClientConfig},
     producer::{FutureProducer, FutureRecord},
 };
+use std::fs::File;
+use std::io::{BufRead, BufReader};
 use std::time::Duration;
 
 use crate::alert::AlertMessage;
+use crate::edr_alert::EdrAlert;
 use super::config::KafkaConfig;
 
 pub struct KafkaProducer {
@@ -58,6 +61,82 @@ impl KafkaProducer {
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
         Ok(())
+    }
+
+    pub async fn send_edr_alert(&self, alert: EdrAlert) -> Result<()> {
+        let json = serde_json::to_string(&alert)?;
+        let alert_key = alert.get_alert_key();
+        let record = FutureRecord::to(&self.config.topic)
+            .payload(json.as_bytes())
+            .key(&alert_key);
+
+        match self.producer.send(record, Duration::from_secs(5)).await {
+            Ok((partition, offset)) => {
+                info!(
+                    "EDR Alert sent successfully to partition {} at offset {} [{}]",
+                    partition, offset, alert.report_name
+                );
+                Ok(())
+            }
+            Err((e, _)) => {
+                error!("Failed to send EDR alert: {}", e);
+                Err(anyhow::anyhow!("Failed to send EDR alert: {}", e))
+            }
+        }
+    }
+
+    pub async fn send_edr_batch(&self, alerts: Vec<EdrAlert>) -> Result<()> {
+        for alert in alerts {
+            if let Err(e) = self.send_edr_alert(alert).await {
+                error!("Failed to send EDR alert in batch: {}", e);
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        Ok(())
+    }
+
+    pub async fn load_and_send_jsonl_file(&self, file_path: &str) -> Result<usize> {
+        info!("Loading EDR alerts from: {}", file_path);
+        
+        let file = File::open(file_path)?;
+        let reader = BufReader::new(file);
+        
+        let mut sent_count = 0;
+        let mut batch = Vec::new();
+        const BATCH_SIZE: usize = 50;
+
+        for line in reader.lines() {
+            let line = line?;
+            if line.trim().is_empty() {
+                continue;
+            }
+
+            match serde_json::from_str::<EdrAlert>(&line) {
+                Ok(alert) => {
+                    batch.push(alert);
+                    
+                    if batch.len() >= BATCH_SIZE {
+                        self.send_edr_batch(batch).await?;
+                        sent_count += BATCH_SIZE;
+                        batch = Vec::new();
+                        info!("Sent batch of {} alerts, total: {}", BATCH_SIZE, sent_count);
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to parse EDR alert: {}", e);
+                }
+            }
+        }
+
+        if !batch.is_empty() {
+            let remaining = batch.len();
+            self.send_edr_batch(batch).await?;
+            sent_count += remaining;
+            info!("Sent final batch of {} alerts", remaining);
+        }
+
+        info!("Successfully sent {} EDR alerts from {}", sent_count, file_path);
+        Ok(sent_count)
     }
 }
 
@@ -154,5 +233,24 @@ mod tests {
         assert_eq!(alerts[0].level, "critical");
         assert_eq!(alerts[1].level, "warning");
         assert_eq!(alerts[2].level, "info");
+    }
+
+    #[test]
+    fn test_edr_alert_parsing() -> Result<()> {
+        let json_data = r#"{"schema":1,"create_time":"2022-07-19T17:48:25.018Z","device_external_ip":"130.126.255.183","device_id":98483951,"device_internal_ip":"192.168.223.128","device_name":"WIN-32-H1","device_os":"WINDOWS","ioc_hit":"test ioc","ioc_id":"565644-0","org_key":"7DMF69PK","parent_cmdline":"C:\\Windows\\Explorer.EXE","parent_guid":"7DMF69PK-test","parent_hash":["hash1","hash2"],"parent_path":"c:\\windows\\explorer.exe","parent_pid":1544,"parent_publisher":[{"name":"Microsoft Windows","state":"SIGNED"}],"parent_reputation":"REP_WHITE","parent_username":"WIN-32-H1\\user","process_cmdline":"cmd.exe","process_guid":"7DMF69PK-test-process","process_hash":["hash3","hash4"],"process_path":"c:\\windows\\system32\\cmd.exe","process_pid":2872,"process_publisher":[{"name":"Microsoft Windows","state":"SIGNED"}],"process_reputation":"REP_WHITE","process_username":"WIN-32-H1\\user","report_id":"test-report-123","report_name":"Test Alert","report_tags":["attack","test"],"severity":1,"type":"watchlist.hit","watchlists":[{"id":"test-id","name":"Test Watchlist"}]}"#;
+
+        let edr_alert: crate::edr_alert::EdrAlert = serde_json::from_str(json_data)?;
+        
+        assert_eq!(edr_alert.device_name, "WIN-32-H1");
+        assert_eq!(edr_alert.severity, 1);
+        assert_eq!(edr_alert.get_severity_level(), "critical");
+        assert_eq!(edr_alert.report_name, "Test Alert");
+        assert!(edr_alert.is_critical());
+        assert!(edr_alert.contains_tag("attack"));
+        
+        let alert_key = edr_alert.get_alert_key();
+        assert_eq!(alert_key, "WIN-32-H1_test-report-123");
+        
+        Ok(())
     }
 }
