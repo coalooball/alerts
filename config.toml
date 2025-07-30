@@ -1,0 +1,17 @@
+[kafka]
+bootstrap_servers = "localhost:9092"
+topic = "alerts"
+group_id = "alerts-consumer-group"
+
+# 生产者配置
+[kafka.producer]
+message_timeout_ms = 5000
+request_timeout_ms = 5000
+retry_backoff_ms = 100
+retries = 3
+
+# 消费者配置
+[kafka.consumer]
+auto_offset_reset = "earliest"
+enable_auto_commit = true
+auto_commit_interval_ms = 1000
