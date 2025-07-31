@@ -8,7 +8,8 @@ export const useConnectivity = () => {
     loading: false, 
     result: null, 
     error: null, 
-    config: null 
+    config: null,
+    type: 'test' // 'test', 'toggle'
   });
 
   const testConnectivity = async (config, showModal = false) => {
@@ -20,7 +21,8 @@ export const useConnectivity = () => {
         loading: true,
         result: null,
         error: null,
-        config: config
+        config: config,
+        type: 'test'
       });
     } else {
       setConnectivityTests(prev => ({
@@ -88,7 +90,8 @@ export const useConnectivity = () => {
         loading: true,
         result: null,
         error: null,
-        config: null // ClickHouse doesn't need config display in modal
+        config: null, // ClickHouse doesn't need config display in modal
+        type: 'test'
       });
     }
     
@@ -122,30 +125,84 @@ export const useConnectivity = () => {
   };
 
   const toggleConfigActive = async (configId, isActive, configs, testConnectivity, loadConfigs, loadActiveConfigs) => {
-    if (isActive) {
-      const config = configs.find(c => c.id === configId);
-      if (config) {
-        const connectionSuccess = await testConnectivity(config);
-        if (!connectionSuccess) {
-          alert('连接测试失败，无法激活配置！');
-          return;
-        }
+    const config = configs.find(c => c.id === configId);
+    
+    if (isActive && config) {
+      // 显示测试连接的模态框
+      setTestModal({
+        show: true,
+        loading: true,
+        result: null,
+        error: null,
+        config: config,
+        type: 'toggle'
+      });
+
+      // 测试连接
+      const connectionSuccess = await testConnectivity(config);
+      
+      if (!connectionSuccess) {
+        // 连接测试失败，显示错误信息
+        setTestModal(prev => ({
+          ...prev,
+          loading: false,
+          result: null,
+          error: '连接测试失败，无法激活配置！请检查配置信息后重试。',
+          type: 'toggle'
+        }));
+        return;
       }
     }
 
     try {
+      // 尝试切换配置状态
       const response = await axios.post(`/api/config/${configId}/toggle`, { is_active: isActive });
+      
       if (response.data.success) {
         loadConfigs();
         loadActiveConfigs();
+        
+        // 显示成功信息
+        if (config) {
+          setTestModal({
+            show: true,
+            loading: false,
+            result: {
+              success: true,
+              message: isActive ? `配置 "${config.name}" 已成功激活` : `配置 "${config.name}" 已成功停用`
+            },
+            error: null,
+            config: config,
+            type: 'toggle'
+          });
+        }
+      } else {
+        // 显示失败信息
+        setTestModal({
+          show: true,
+          loading: false,
+          result: null,
+          error: response.data.message || '操作失败，请重试',
+          config: config,
+          type: 'toggle'
+        });
       }
     } catch (error) {
       console.error('Failed to toggle config:', error);
+      // 显示错误信息
+      setTestModal({
+        show: true,
+        loading: false,
+        result: null,
+        error: error.response?.data?.message || error.message || '网络错误，请检查连接后重试',
+        config: config,
+        type: 'toggle'
+      });
     }
   };
 
   const closeTestModal = () => {
-    setTestModal({ show: false, loading: false, result: null, error: null, config: null });
+    setTestModal({ show: false, loading: false, result: null, error: null, config: null, type: 'test' });
   };
 
   return {
