@@ -3,6 +3,9 @@ name = "alerts"
 version = "0.1.0"
 edition = "2024"
 
+[[bin]]
+name = "kafka-sender"
+path = "src/bin/kafka_sender.rs"
 
 [dependencies]
 rdkafka = { version = "0.35", features = ["cmake-build"] }
@@ -15,3 +18,4 @@ env_logger = "0.10"
 chrono = { version = "0.4", features = ["serde"] }
 toml = "0.8"
 tempfile = "3.0"
+clap = { version = "4.0", features = ["derive"] }

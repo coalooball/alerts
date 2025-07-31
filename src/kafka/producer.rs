@@ -5,7 +5,7 @@ use rdkafka::{
     producer::{FutureProducer, FutureRecord},
 };
 use std::fs::File;
-use std::io::{BufRead, BufReader, Read};
+use std::io::{BufRead, BufReader};
 use std::time::Duration;
 
 use crate::alert::AlertMessage;
