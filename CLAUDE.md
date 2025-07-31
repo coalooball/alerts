@@ -11,7 +11,9 @@ This is a Rust-based cybersecurity alert processing system that uses Apache Kafk
 ### Building and Running
 - `cargo build` - Build the project
 - `cargo run` - Run the main application (auto-detects and loads alert files or sends sample alerts)
-- `cargo run --bin test_kafka` - Run the Kafka connection test utility
+- `cargo run --bin kafka-sender` - Run the standalone Kafka message sender with CLI options  
+- `cargo run --bin kafka-consumer` - Run the standalone Kafka message consumer with CLI options
+- `cargo run --bin web-server` - Run the Axum web server with React frontend on http://localhost:3000
 - `cargo test` - Run tests (if any exist)
 
 ### Development
@@ -51,9 +53,10 @@ The Kafka components are organized in `src/kafka/`:
 ### Configuration
 
 Configuration is managed through `config.toml` with separate sections for producer and consumer settings:
-- Kafka broker settings (default: localhost:9092)
+- Kafka broker settings (configurable, defaults vary by environment)
 - Producer timeouts and retry logic
 - Consumer offset and commit settings
+- Topic and consumer group configuration
 
 ### Security Dataset Structure
 
@@ -72,8 +75,54 @@ The `atlasv2/data/attack/` directory contains organized cybersecurity datasets:
 - **anyhow**: Error handling across async operations
 - **toml/tempfile**: Configuration and temporary file management
 
+## CLI Tools
+
+### kafka-sender Binary
+Standalone tool for sending JSONL data to Kafka with rate control:
+- `--data <file>` - JSONL data file path
+- `--data-type <type>` - Data type: alert, edr, ngav
+- `--rate <n>` - Messages per second (default: 10)
+- `--max-messages <n>` - Message limit (0 = unlimited)
+- `--config <file>` - Configuration file (default: config.toml)
+- `--verbose` - Enable verbose logging
+
+### kafka-consumer Binary
+Standalone tool for consuming and displaying Kafka messages:
+- `--pretty` - Pretty print JSON messages
+- `--metadata` - Show message metadata (offset, partition, timestamp)
+- `--max-messages <n>` - Message limit (0 = unlimited)
+- `--group-id <id>` - Consumer group ID override
+- `--topic <topic>` - Topic name override
+- `--offset-reset <mode>` - earliest, latest, or none
+- `--verbose` - Enable verbose logging
+
+### web-server Binary
+Axum-based web server with React frontend for Kafka management:
+- Serves React frontend on http://localhost:3000
+- API endpoints for Kafka connectivity testing
+- Web interface for sending/receiving Kafka messages
+- Real-time message consumption and display
+- Configuration management through web UI
+
+## Web API Endpoints
+
+The web server provides the following REST API endpoints:
+
+- `GET /api/config` - Get current Kafka configuration
+- `GET /api/test-connectivity` - Test Kafka connectivity with optional custom config
+- `POST /api/send-message` - Send alert messages to Kafka (supports alert, edr, ngav types)
+- `GET /api/consume-messages` - Consume latest messages from Kafka topic
+
+## Frontend Development
+
+The React frontend is located in `frontend/` directory:
+- `cd frontend && npm install` - Install dependencies
+- `npm run dev` - Start development server (with proxy to backend)
+- `npm run build` - Build for production (outputs to `frontend/dist/`)
+
 ## Runtime Requirements
 
-- Running Kafka instance on localhost:9092
+- Running Kafka instance (configured in config.toml)
+- For web server: built React frontend in `frontend/dist/` (served statically)
 - The application will fall back to sample alerts if dataset files are not found
 - Consumer runs in background task while producer sends alerts in main thread

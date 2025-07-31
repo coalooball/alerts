@@ -7,6 +7,10 @@ edition = "2024"
 name = "kafka-sender"
 path = "src/bin/kafka_sender.rs"
 
+[[bin]]
+name = "web-server"
+path = "src/bin/web_server.rs"
+
 [dependencies]
 rdkafka = { version = "0.35", features = ["cmake-build"] }
 tokio = { version = "1.0", features = ["full"] }
@@ -19,3 +23,6 @@ chrono = { version = "0.4", features = ["serde"] }
 toml = "0.8"
 tempfile = "3.0"
 clap = { version = "4.0", features = ["derive"] }
+axum = "0.7"
+tower = "0.4"
+tower-http = { version = "0.5", features = ["fs", "cors"] }
