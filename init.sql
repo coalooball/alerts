@@ -152,3 +152,33 @@ CREATE TRIGGER update_clickhouse_config_updated_at
     BEFORE UPDATE ON clickhouse_config
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
+
+-- Create data_source_configs table for EDR/NGAV Kafka node mappings
+CREATE TABLE IF NOT EXISTS data_source_configs (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    data_type VARCHAR(50) NOT NULL, -- 'edr' or 'ngav'
+    kafka_config_id UUID NOT NULL REFERENCES kafka_configs(id) ON DELETE CASCADE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE(data_type, kafka_config_id)
+);
+
+-- Create indexes for data_source_configs
+CREATE INDEX IF NOT EXISTS idx_data_source_configs_data_type ON data_source_configs (data_type);
+CREATE INDEX IF NOT EXISTS idx_data_source_configs_kafka_id ON data_source_configs (kafka_config_id);
+
+-- Create trigger to automatically update updated_at for data_source_configs
+DROP TRIGGER IF EXISTS update_data_source_configs_updated_at ON data_source_configs;
+CREATE TRIGGER update_data_source_configs_updated_at
+    BEFORE UPDATE ON data_source_configs
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+
+-- Insert default data source configurations
+INSERT INTO data_source_configs (data_type, kafka_config_id) 
+SELECT 'edr', id FROM kafka_configs WHERE name = 'default'
+ON CONFLICT (data_type, kafka_config_id) DO NOTHING;
+
+INSERT INTO data_source_configs (data_type, kafka_config_id) 
+SELECT 'ngav', id FROM kafka_configs WHERE name = 'development'
+ON CONFLICT (data_type, kafka_config_id) DO NOTHING;

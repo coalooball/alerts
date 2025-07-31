@@ -102,6 +102,16 @@ create-db:
 	@echo "🗄️ Creating alert_server database..."
 	psql -U postgres -h 10.26.64.224 -c "CREATE DATABASE alert_server;" || echo "Database may already exist"
 
+init-db: build-backend
+	@echo "🔄 Initializing database (drop and recreate)..."
+	cargo run --bin web-server -- --init
+	@echo "✅ Database initialization completed"
+
+init-db-dev: dev-backend
+	@echo "🔄 Initializing database (drop and recreate, dev build)..."
+	cargo run --bin web-server -- --init
+	@echo "✅ Database initialization completed"
+
 # Quick development workflow
 quick: dev-backend build-frontend start-dev
 
@@ -134,6 +144,8 @@ help:
 	@echo "Database:"
 	@echo "  setup-db     - Setup PostgreSQL database (info only)"
 	@echo "  create-db    - Create alert_server database"
+	@echo "  init-db      - Initialize database (drop & recreate, release build)"
+	@echo "  init-db-dev  - Initialize database (drop & recreate, dev build)"
 	@echo ""
 	@echo "Cleanup:"
 	@echo "  clean        - Clean all build artifacts"

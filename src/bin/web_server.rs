@@ -6,19 +6,22 @@ use axum::{
     routing::{delete, get, post, put},
     Router,
 };
+use clap::{Arg, Command};
 use log::{info, error};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tower::ServiceBuilder;
 use tower_http::{cors::CorsLayer, services::ServeDir};
 
-use alerts::{AlertMessage, KafkaConfig, KafkaProducer, Database, DatabaseConfig};
+use alerts::{AlertMessage, KafkaConfig, KafkaProducer, Database, DatabaseConfig, ClickHouseConnection, ConsumerService};
 use alerts::kafka::config::{KafkaProducerConfig, KafkaConsumerConfig};
 
 #[derive(Clone)]
 struct AppState {
     config: KafkaConfig,
     database: Arc<Database>,
+    clickhouse: Option<Arc<ClickHouseConnection>>,
+    consumer_service: Option<Arc<ConsumerService>>,
 }
 
 #[derive(Deserialize)]
@@ -96,6 +99,19 @@ struct SaveClickHouseConfigRequest {
     max_connections: Option<i32>,
 }
 
+#[derive(Deserialize)]
+struct SaveDataSourceConfigRequest {
+    data_type: String, // 'edr' or 'ngav'
+    kafka_config_ids: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct DataSourceConfigResponse {
+    success: bool,
+    message: String,
+    configs: Option<serde_json::Value>,
+}
+
 #[derive(Serialize)]
 struct ClickHouseConfigResponse {
     success: bool,
@@ -127,11 +143,56 @@ struct KafkaMessage {
     payload: String,
 }
 
+#[derive(Serialize)]
+struct AlertsResponse {
+    success: bool,
+    alerts: Vec<serde_json::Value>,
+    total: u64,
+}
+
+#[derive(Deserialize)]
+struct AlertsQuery {
+    limit: Option<u32>,
+    offset: Option<u32>,
+}
+
+#[derive(Serialize)]
+struct AlertDetailResponse {
+    success: bool,
+    alert: Option<serde_json::Value>,
+    alert_type: Option<String>,
+}
+
+#[derive(Serialize)]
+struct ConsumerStatusResponse {
+    success: bool,
+    consumers: serde_json::Value,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     env_logger::Builder::from_default_env()
         .filter_level(log::LevelFilter::Info)
         .init();
+
+    // Parse command line arguments
+    let matches = Command::new("web-server")
+        .version("1.0")
+        .author("Alerts Team")
+        .about("Kafka Alerts Web Server")
+        .arg(
+            Arg::new("init")
+                .long("init")
+                .action(clap::ArgAction::SetTrue)
+                .help("Initialize database (drop and recreate if exists)")
+        )
+        .get_matches();
+
+    let init_db = matches.get_flag("init");
+
+    if init_db {
+        info!("🔄 Database initialization mode enabled");
+    }
 
     info!("🚀 Starting Kafka Alerts Web Server");
 
@@ -139,22 +200,37 @@ async fn main() -> Result<()> {
     let db_config = DatabaseConfig::from_env();
     info!("📊 Connecting to database at {}:{}...", db_config.host, db_config.port);
     
-    let database = match Database::new(db_config).await {
-        Ok(db) => {
-            info!("✅ Database connection established");
-            
-            // Initialize database schema
-            if let Err(e) = db.initialize_schema().await {
-                error!("❌ Failed to initialize database schema: {}", e);
+    let database = if init_db {
+        info!("🗄️ Initializing database (drop and recreate)...");
+        match Database::new_with_init(db_config).await {
+            Ok(_db) => {
+                info!("✅ Database initialized successfully");
+                info!("🎉 Database initialization completed. Exiting...");
+                return Ok(());
+            }
+            Err(e) => {
+                error!("❌ Failed to initialize database: {}", e);
                 return Err(e);
             }
-            
-            Arc::new(db)
         }
-        Err(e) => {
-            error!("❌ Failed to connect to database: {}", e);
-            error!("Please ensure PostgreSQL is running with database 'alert_server'");
-            return Err(e);
+    } else {
+        match Database::new(db_config).await {
+            Ok(db) => {
+                info!("✅ Database connection established");
+                
+                // Initialize database schema
+                if let Err(e) = db.initialize_schema().await {
+                    error!("❌ Failed to initialize database schema: {}", e);
+                    return Err(e);
+                }
+                
+                Arc::new(db)
+            }
+            Err(e) => {
+                error!("❌ Failed to connect to database: {}", e);
+                error!("Please ensure PostgreSQL is running with database 'alert_server'");
+                return Err(e);
+            }
         }
     };
 
@@ -185,7 +261,70 @@ async fn main() -> Result<()> {
         }
     };
 
-    let state = AppState { config, database };
+    // Initialize ClickHouse connection
+    let clickhouse = match database.get_clickhouse_config().await {
+        Ok(Some(ch_config)) => {
+            info!("🏠 Initializing ClickHouse connection...");
+            match ClickHouseConnection::new(ch_config).await {
+                Ok(ch) => {
+                    if let Err(e) = ch.test_connection().await {
+                        error!("❌ ClickHouse connectivity test failed: {}", e);
+                        None
+                    } else {
+                        info!("✅ ClickHouse connection established");
+                        if let Err(e) = ch.initialize_tables().await {
+                            error!("❌ Failed to initialize ClickHouse tables: {}", e);
+                        } else {
+                            info!("✅ ClickHouse tables initialized");
+                        }
+                        Some(Arc::new(ch))
+                    }
+                }
+                Err(e) => {
+                    error!("❌ Failed to create ClickHouse connection: {}", e);
+                    None
+                }
+            }
+        }
+        Ok(None) => {
+            info!("⚠️ No ClickHouse configuration found in database");
+            None
+        }
+        Err(e) => {
+            error!("❌ Failed to load ClickHouse configuration: {}", e);
+            None
+        }
+    };
+
+    // Initialize consumer service if ClickHouse is available
+    let consumer_service = if let Some(ch) = &clickhouse {
+        info!("🔄 Initializing consumer service...");
+        match ConsumerService::new(Arc::clone(&database), Arc::clone(ch)).await {
+            Ok(service) => {
+                if let Err(e) = service.start().await {
+                    error!("❌ Failed to start consumer service: {}", e);
+                    None
+                } else {
+                    info!("✅ Consumer service started");
+                    Some(Arc::new(service))
+                }
+            }
+            Err(e) => {
+                error!("❌ Failed to create consumer service: {}", e);
+                None
+            }
+        }
+    } else {
+        info!("⚠️ Consumer service not started - ClickHouse not available");
+        None
+    };
+
+    let state = AppState { 
+        config, 
+        database, 
+        clickhouse,
+        consumer_service,
+    };
 
     let app = Router::new()
         .route("/api/test-connectivity", get(test_connectivity))
@@ -202,6 +341,12 @@ async fn main() -> Result<()> {
         .route("/api/clickhouse-config", post(save_clickhouse_config))
         .route("/api/clickhouse-config", delete(delete_clickhouse_config))
         .route("/api/test-clickhouse-connectivity", get(test_clickhouse_connectivity))
+        .route("/api/data-source-config", get(get_data_source_configs))
+        .route("/api/data-source-config", post(save_data_source_config))
+        .route("/api/alerts", get(get_alerts))
+        .route("/api/alerts/:id", get(get_alert_detail))
+        .route("/api/consumer-status", get(get_consumer_status))
+        .route("/api/live-messages", get(get_live_messages))
         .nest_service("/", ServeDir::new("./frontend/dist"))
         .layer(
             ServiceBuilder::new()
@@ -789,4 +934,274 @@ async fn test_clickhouse_connectivity(
     };
 
     Ok(ResponseJson(response))
+}
+
+async fn get_data_source_configs(
+    State(state): State<Arc<AppState>>,
+) -> Result<ResponseJson<DataSourceConfigResponse>, StatusCode> {
+    info!("Getting data source configurations");
+
+    match state.database.get_data_source_configs().await {
+        Ok(configs) => {
+            // Group configs by data_type
+            let mut grouped_configs = std::collections::HashMap::new();
+            for config in configs {
+                let data_type = config.get("data_type")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+                
+                grouped_configs
+                    .entry(data_type)
+                    .or_insert_with(Vec::new)
+                    .push(config);
+            }
+
+            let response = DataSourceConfigResponse {
+                success: true,
+                message: "Data source configurations retrieved successfully".to_string(),
+                configs: Some(serde_json::to_value(grouped_configs).unwrap_or_default()),
+            };
+            Ok(ResponseJson(response))
+        }
+        Err(e) => {
+            error!("Failed to get data source configurations: {}", e);
+            let response = DataSourceConfigResponse {
+                success: false,
+                message: format!("Failed to get data source configurations: {}", e),
+                configs: None,
+            };
+            Ok(ResponseJson(response))
+        }
+    }
+}
+
+async fn save_data_source_config(
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<SaveDataSourceConfigRequest>,
+) -> Result<ResponseJson<DataSourceConfigResponse>, StatusCode> {
+    info!("Saving data source configuration for type: {}", request.data_type);
+
+    // Validate data_type
+    if !["edr", "ngav"].contains(&request.data_type.as_str()) {
+        let response = DataSourceConfigResponse {
+            success: false,
+            message: "Invalid data type. Must be 'edr' or 'ngav'".to_string(),
+            configs: None,
+        };
+        return Ok(ResponseJson(response));
+    }
+
+    // Parse Kafka config IDs
+    let mut kafka_config_ids = Vec::new();
+    for id_str in &request.kafka_config_ids {
+        match uuid::Uuid::parse_str(id_str) {
+            Ok(uuid) => kafka_config_ids.push(uuid),
+            Err(e) => {
+                error!("Invalid UUID format for Kafka config ID {}: {}", id_str, e);
+                let response = DataSourceConfigResponse {
+                    success: false,
+                    message: format!("Invalid Kafka config ID format: {}", id_str),
+                    configs: None,
+                };
+                return Ok(ResponseJson(response));
+            }
+        }
+    }
+
+    match state.database.save_data_source_config(&request.data_type, &kafka_config_ids).await {
+        Ok(()) => {
+            info!("✅ Data source configuration saved successfully for type: {}", request.data_type);
+            let response = DataSourceConfigResponse {
+                success: true,
+                message: "Data source configuration saved successfully".to_string(),
+                configs: None,
+            };
+            Ok(ResponseJson(response))
+        }
+        Err(e) => {
+            error!("❌ Failed to save data source configuration: {}", e);
+            let response = DataSourceConfigResponse {
+                success: false,
+                message: format!("Failed to save data source configuration: {}", e),
+                configs: None,
+            };
+            Ok(ResponseJson(response))
+        }
+    }
+}
+
+async fn get_alerts(
+    Query(params): Query<AlertsQuery>,
+    State(state): State<Arc<AppState>>,
+) -> Result<ResponseJson<AlertsResponse>, StatusCode> {
+    let limit = params.limit.unwrap_or(50);
+    let offset = params.offset.unwrap_or(0);
+    
+    match &state.clickhouse {
+        Some(ch) => {
+            match ch.get_common_alerts(limit, offset).await {
+                Ok(alerts) => {
+                    let alerts_json: Vec<serde_json::Value> = alerts
+                        .into_iter()
+                        .map(|alert| serde_json::to_value(alert).unwrap_or_default())
+                        .collect();
+                    
+                    let total = alerts_json.len() as u64;
+                    
+                    Ok(ResponseJson(AlertsResponse {
+                        success: true,
+                        alerts: alerts_json,
+                        total,
+                    }))
+                }
+                Err(e) => {
+                    error!("Failed to get alerts: {}", e);
+                    Ok(ResponseJson(AlertsResponse {
+                        success: false,
+                        alerts: vec![],
+                        total: 0,
+                    }))
+                }
+            }
+        }
+        None => {
+            Ok(ResponseJson(AlertsResponse {
+                success: false,
+                alerts: vec![],
+                total: 0,
+            }))
+        }
+    }
+}
+
+async fn get_alert_detail(
+    axum::extract::Path(id): axum::extract::Path<String>,
+    State(state): State<Arc<AppState>>,
+) -> Result<ResponseJson<AlertDetailResponse>, StatusCode> {
+    match &state.clickhouse {
+        Some(ch) => {
+            // First try to get common alert
+            match ch.get_common_alert_by_id(&id).await {
+                Ok(Some(common_alert)) => {
+                    let data_type = common_alert.data_type.clone();
+                    
+                    // Get specific alert details based on type
+                    let specific_alert = match data_type.as_str() {
+                        "edr" => {
+                            ch.get_edr_alert_by_id(&id).await
+                                .unwrap_or(None)
+                                .map(|alert| serde_json::to_value(alert).unwrap_or_default())
+                        }
+                        "ngav" => {
+                            ch.get_ngav_alert_by_id(&id).await
+                                .unwrap_or(None)
+                                .map(|alert| serde_json::to_value(alert).unwrap_or_default())
+                        }
+                        _ => None
+                    };
+                    
+                    let mut alert_json = serde_json::to_value(common_alert).unwrap_or_default();
+                    if let Some(specific) = specific_alert {
+                        if let (Some(alert_obj), Some(specific_obj)) = 
+                            (alert_json.as_object_mut(), specific.as_object()) {
+                            for (key, value) in specific_obj {
+                                alert_obj.insert(format!("detailed_{}", key), value.clone());
+                            }
+                        }
+                    }
+                    
+                    Ok(ResponseJson(AlertDetailResponse {
+                        success: true,
+                        alert: Some(alert_json),
+                        alert_type: Some(data_type),
+                    }))
+                }
+                Ok(None) => {
+                    Ok(ResponseJson(AlertDetailResponse {
+                        success: false,
+                        alert: None,
+                        alert_type: None,
+                    }))
+                }
+                Err(e) => {
+                    error!("Failed to get alert detail: {}", e);
+                    Ok(ResponseJson(AlertDetailResponse {
+                        success: false,
+                        alert: None,
+                        alert_type: None,
+                    }))
+                }
+            }
+        }
+        None => {
+            Ok(ResponseJson(AlertDetailResponse {
+                success: false,
+                alert: None,
+                alert_type: None,
+            }))
+        }
+    }
+}
+
+async fn get_consumer_status(
+    State(state): State<Arc<AppState>>,
+) -> Result<ResponseJson<ConsumerStatusResponse>, StatusCode> {
+    match &state.consumer_service {
+        Some(service) => {
+            let status = service.get_consumer_status().await;
+            Ok(ResponseJson(ConsumerStatusResponse {
+                success: true,
+                consumers: serde_json::to_value(status).unwrap_or_default(),
+            }))
+        }
+        None => {
+            Ok(ResponseJson(ConsumerStatusResponse {
+                success: false,
+                consumers: serde_json::json!({}),
+            }))
+        }
+    }
+}
+
+async fn get_live_messages(
+    State(state): State<Arc<AppState>>,
+) -> Result<ResponseJson<serde_json::Value>, StatusCode> {
+    match &state.consumer_service {
+        Some(service) => {
+            let mut receiver = service.get_message_receiver();
+            let mut messages = Vec::new();
+            
+            // Try to receive messages for a short time
+            for _ in 0..10 {
+                match tokio::time::timeout(
+                    tokio::time::Duration::from_millis(100),
+                    receiver.recv()
+                ).await {
+                    Ok(Ok(message)) => {
+                        messages.push(serde_json::json!({
+                            "topic": message.topic,
+                            "partition": message.partition,
+                            "offset": message.offset,
+                            "payload": message.payload,
+                            "timestamp": message.timestamp,
+                            "data_type": message.data_type
+                        }));
+                    }
+                    _ => break,
+                }
+            }
+            
+            Ok(ResponseJson(serde_json::json!({
+                "success": true,
+                "messages": messages
+            })))
+        }
+        None => {
+            Ok(ResponseJson(serde_json::json!({
+                "success": false,
+                "messages": []
+            })))
+        }
+    }
 }

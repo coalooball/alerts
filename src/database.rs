@@ -95,6 +95,52 @@ pub struct Database {
 }
 
 impl Database {
+    pub async fn new_with_init(config: DatabaseConfig) -> Result<Self> {
+        // 连接到默认数据库以删除和重新创建目标数据库
+        log::info!("🔄 Initializing database '{}' (drop and recreate)...", config.database);
+        
+        let default_pool = PgPool::connect(&config.default_connection_string()).await?;
+        
+        // 终止所有连接到目标数据库的会话
+        log::info!("🔌 Terminating existing connections to database '{}'...", config.database);
+        sqlx::query(&format!(
+            "SELECT pg_terminate_backend(pg_stat_activity.pid) 
+             FROM pg_stat_activity 
+             WHERE pg_stat_activity.datname = '{}' 
+             AND pid <> pg_backend_pid()", 
+            config.database
+        ))
+        .execute(&default_pool)
+        .await?;
+
+        // 删除数据库（如果存在）
+        log::info!("🗑️ Dropping database '{}' if it exists...", config.database);
+        sqlx::query(&format!("DROP DATABASE IF EXISTS \"{}\"", config.database))
+            .execute(&default_pool)
+            .await?;
+
+        // 创建新数据库
+        log::info!("🏗️ Creating database '{}'...", config.database);
+        sqlx::query(&format!("CREATE DATABASE \"{}\"", config.database))
+            .execute(&default_pool)
+            .await?;
+
+        default_pool.close().await;
+
+        // 连接到新创建的数据库
+        log::info!("📊 Connecting to newly created database '{}'...", config.database);
+        let pool = PgPool::connect(&config.connection_string()).await?;
+        
+        let database = Self { pool };
+        
+        // 初始化数据库架构
+        log::info!("🏗️ Initializing database schema...");
+        database.initialize_schema().await?;
+        
+        log::info!("✅ Database initialization completed successfully");
+        Ok(database)
+    }
+
     pub async fn new(config: DatabaseConfig) -> Result<Self> {
         // 首先连接到默认数据库（postgres）来检查目标数据库是否存在
         log::info!("🔍 Checking if database '{}' exists...", config.database);
@@ -422,6 +468,100 @@ impl Database {
 
     pub async fn delete_clickhouse_config(&self) -> Result<()> {
         sqlx::query("DELETE FROM clickhouse_config")
+            .execute(&self.pool)
+            .await?;
+
+        Ok(())
+    }
+
+    // Data source configuration methods
+    pub async fn get_data_source_configs(&self) -> Result<Vec<serde_json::Value>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT 
+                dsc.id,
+                dsc.data_type,
+                dsc.kafka_config_id,
+                dsc.created_at,
+                dsc.updated_at,
+                kc.id as kafka_id,
+                kc.name as kafka_name,
+                kc.bootstrap_servers,
+                kc.topic,
+                kc.group_id,
+                kc.is_active as kafka_is_active
+            FROM data_source_configs dsc
+            JOIN kafka_configs kc ON dsc.kafka_config_id = kc.id
+            ORDER BY dsc.data_type, kc.name
+            "#
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut configs = Vec::new();
+        for row in rows {
+            let config = serde_json::json!({
+                "id": row.get::<uuid::Uuid, _>("id"),
+                "data_type": row.get::<String, _>("data_type"),
+                "kafka_config_id": row.get::<uuid::Uuid, _>("kafka_config_id"),
+                "created_at": row.get::<chrono::DateTime<chrono::Utc>, _>("created_at"),
+                "updated_at": row.get::<chrono::DateTime<chrono::Utc>, _>("updated_at"),
+                "kafka_config": {
+                    "id": row.get::<uuid::Uuid, _>("kafka_id"),
+                    "name": row.get::<String, _>("kafka_name"),
+                    "bootstrap_servers": row.get::<String, _>("bootstrap_servers"),
+                    "topic": row.get::<String, _>("topic"),
+                    "group_id": row.get::<String, _>("group_id"),
+                    "is_active": row.get::<bool, _>("kafka_is_active")
+                }
+            });
+            configs.push(config);
+        }
+
+        Ok(configs)
+    }
+
+    pub async fn save_data_source_config(
+        &self,
+        data_type: &str,
+        kafka_config_ids: &[uuid::Uuid],
+    ) -> Result<()> {
+        // Start a transaction
+        let mut tx = self.pool.begin().await?;
+
+        // First, delete existing configs for this data type
+        sqlx::query("DELETE FROM data_source_configs WHERE data_type = $1")
+            .bind(data_type)
+            .execute(&mut *tx)
+            .await?;
+
+        // Insert new configurations
+        for kafka_config_id in kafka_config_ids {
+            sqlx::query("INSERT INTO data_source_configs (data_type, kafka_config_id) VALUES ($1, $2)")
+                .bind(data_type)
+                .bind(kafka_config_id)
+                .execute(&mut *tx)
+                .await?;
+        }
+
+        // Commit the transaction
+        tx.commit().await?;
+
+        Ok(())
+    }
+
+    pub async fn get_data_source_configs_by_type(&self, data_type: &str) -> Result<Vec<uuid::Uuid>> {
+        let rows = sqlx::query("SELECT kafka_config_id FROM data_source_configs WHERE data_type = $1")
+            .bind(data_type)
+            .fetch_all(&self.pool)
+            .await?;
+
+        Ok(rows.into_iter().map(|row| row.get::<uuid::Uuid, _>("kafka_config_id")).collect())
+    }
+
+    pub async fn delete_data_source_config(&self, data_type: &str) -> Result<()> {
+        sqlx::query("DELETE FROM data_source_configs WHERE data_type = $1")
+            .bind(data_type)
             .execute(&self.pool)
             .await?;
 

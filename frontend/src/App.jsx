@@ -10,6 +10,9 @@ import { useTooltip } from './hooks/useTooltip';
 import HomePage from './components/HomePage';
 import KafkaConfig from './components/KafkaConfig';
 import ClickHouseConfig from './components/ClickHouseConfig';
+import DataSourceConfig from './components/DataSourceConfig';
+import AlertData from './components/AlertData';
+import Logs from './components/Logs';
 import TestModal from './components/TestModal';
 import Tooltip from './components/Tooltip';
 
@@ -69,7 +72,13 @@ function App() {
             className={`tab-button ${configTab === 'clickhouse' ? 'active' : ''}`}
             onClick={() => setConfigTab('clickhouse')}
           >
-            ClickHouse配置
+            数据库配置
+          </button>
+          <button 
+            className={`tab-button ${configTab === 'datasource' ? 'active' : ''}`}
+            onClick={() => setConfigTab('datasource')}
+          >
+            数据来源配置
           </button>
         </div>
       </div>
@@ -105,6 +114,12 @@ function App() {
           testClickhouseConnectivity={testClickhouseConnectivity}
         />
       )}
+
+      {configTab === 'datasource' && (
+        <DataSourceConfig
+          configs={configs}
+        />
+      )}
     </div>
   );
 
@@ -120,6 +135,16 @@ function App() {
             <li className={activeView === 'home' ? 'active' : ''}>
               <button onClick={() => setActiveView('home')}>
                 🏠 首页
+              </button>
+            </li>
+            <li className={activeView === 'alerts' ? 'active' : ''}>
+              <button onClick={() => setActiveView('alerts')}>
+                🚨 告警数据
+              </button>
+            </li>
+            <li className={activeView === 'logs' ? 'active' : ''}>
+              <button onClick={() => setActiveView('logs')}>
+                📋 日志
               </button>
             </li>
             <li className={activeView === 'config' ? 'active' : ''}>
@@ -139,6 +164,8 @@ function App() {
               hideTooltip={hideTooltip}
             />
           )}
+          {activeView === 'alerts' && <AlertData />}
+          {activeView === 'logs' && <Logs />}
           {activeView === 'config' && renderConfigPage()}
         </main>
       </div>
