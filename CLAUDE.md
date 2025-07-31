@@ -109,10 +109,17 @@ Axum-based web server with React frontend for Kafka management:
 
 The web server provides the following REST API endpoints:
 
-- `GET /api/config` - Get current active Kafka configuration
+### Configuration Management
+- `GET /api/config` - Get current active Kafka configuration (first active)
 - `GET /api/configs` - List all saved Kafka configurations  
+- `GET /api/configs/active` - List all currently active configurations
 - `POST /api/config` - Save a new Kafka configuration
-- `POST /api/config/:id/activate` - Activate a specific configuration
+- `PUT /api/config/:id` - Update an existing configuration
+- `DELETE /api/config/:id` - Delete a configuration
+- `POST /api/config/:id/activate` - Set as only active configuration (deactivate others)
+- `POST /api/config/:id/toggle` - Toggle configuration active status
+
+### Connectivity & Messaging  
 - `GET /api/test-connectivity` - Test Kafka connectivity with optional custom config
 - `GET /api/consume-messages` - Consume latest messages from Kafka topic
 
@@ -125,7 +132,7 @@ The React frontend is located in `frontend/` directory:
 
 ## Runtime Requirements
 
-- **PostgreSQL Database**: Running at 10.26.64.224:5432 with `alert_server` database
+- **PostgreSQL Database**: Running at 10.26.64.224:5432 (automatically creates `alert_server` database)
 - **Database Schema**: Automatically initialized on first startup using `init.sql`
 - **Kafka Instance**: As configured in database (default: 10.26.64.224:9093)
 - **Frontend**: Built React app in `frontend/dist/` (served statically by web server)
@@ -135,7 +142,28 @@ The React frontend is located in `frontend/` directory:
 
 When the web server starts, it automatically:
 
-1. **Connects** to PostgreSQL at `10.26.64.224:5432/alert_server`
-2. **Checks** if `kafka_configs` table exists
-3. **Reads and executes** `init.sql` if tables don't exist (fails if `init.sql` not found)
-4. **Creates default** Kafka configuration (10.26.64.224:9093) as part of `init.sql`
+1. **Connects** to PostgreSQL at `10.26.64.224:5432`
+2. **Checks and creates** `alert_server` database if it doesn't exist
+3. **Connects** to the `alert_server` database
+4. **Checks** if `kafka_configs` table exists
+5. **Reads and executes** `init.sql` if tables don't exist (fails if `init.sql` not found)  
+6. **Creates default** Kafka configurations as part of `init.sql`
+
+## Enhanced Configuration Features
+
+### Multiple Active Configurations
+- Support for multiple simultaneously active Kafka configurations
+- Toggle individual configurations on/off
+- "Set as Only Active" option to activate one and deactivate all others
+
+### Rich Configuration Management
+- **Create**: Add new Kafka configurations with full parameter control
+- **Read**: View all configurations with detailed information
+- **Update**: Edit existing configurations while preserving active status
+- **Delete**: Remove configurations with confirmation dialog
+
+### Interactive UI Features
+- **Hover Tooltips**: Mouse over active configuration badges to see detailed settings
+- **Real-time Updates**: Configuration changes immediately reflect across the interface
+- **Visual Status**: Clear indicators for active/inactive configurations
+- **Bulk Operations**: Manage multiple configurations efficiently

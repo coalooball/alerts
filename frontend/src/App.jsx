@@ -5,6 +5,7 @@ import './App.css';
 function App() {
   const [config, setConfig] = useState({});
   const [configs, setConfigs] = useState([]);
+  const [activeConfigs, setActiveConfigs] = useState([]);
   const [connectivityTest, setConnectivityTest] = useState({
     loading: false,
     result: null,
@@ -27,12 +28,15 @@ function App() {
     enable_auto_commit: true,
     auto_commit_interval_ms: 1000
   });
+  const [editingConfig, setEditingConfig] = useState(null);
   const [showConfigForm, setShowConfigForm] = useState(false);
   const [saveResult, setSaveResult] = useState(null);
+  const [tooltip, setTooltip] = useState({ show: false, content: '', x: 0, y: 0 });
 
   useEffect(() => {
     loadConfig();
     loadConfigs();
+    loadActiveConfigs();
   }, []);
 
   const loadConfig = async () => {
@@ -56,6 +60,17 @@ function App() {
       }
     } catch (error) {
       console.error('Failed to load configs:', error);
+    }
+  };
+
+  const loadActiveConfigs = async () => {
+    try {
+      const response = await axios.get('/api/configs/active');
+      if (response.data.success) {
+        setActiveConfigs(response.data.configs);
+      }
+    } catch (error) {
+      console.error('Failed to load active configs:', error);
     }
   };
 
@@ -87,24 +102,20 @@ function App() {
     setSaveResult(null);
     
     try {
-      const response = await axios.post('/api/config', newConfig);
+      let response;
+      if (editingConfig) {
+        response = await axios.put(`/api/config/${editingConfig.id}`, newConfig);
+      } else {
+        response = await axios.post('/api/config', newConfig);
+      }
+      
       setSaveResult(response.data);
       if (response.data.success) {
         setShowConfigForm(false);
+        setEditingConfig(null);
         loadConfigs();
-        setNewConfig({
-          name: '',
-          bootstrap_servers: '',
-          topic: '',
-          group_id: '',
-          message_timeout_ms: 5000,
-          request_timeout_ms: 5000,
-          retry_backoff_ms: 100,
-          retries: 3,
-          auto_offset_reset: 'earliest',
-          enable_auto_commit: true,
-          auto_commit_interval_ms: 1000
-        });
+        loadActiveConfigs();
+        resetConfigForm();
       }
     } catch (error) {
       setSaveResult({
@@ -114,16 +125,101 @@ function App() {
     }
   };
 
+  const resetConfigForm = () => {
+    setNewConfig({
+      name: '',
+      bootstrap_servers: '',
+      topic: '',
+      group_id: '',
+      message_timeout_ms: 5000,
+      request_timeout_ms: 5000,
+      retry_backoff_ms: 100,
+      retries: 3,
+      auto_offset_reset: 'earliest',
+      enable_auto_commit: true,
+      auto_commit_interval_ms: 1000
+    });
+  };
+
+  const startEditConfig = (config) => {
+    setEditingConfig(config);
+    setNewConfig({
+      name: config.name,
+      bootstrap_servers: config.bootstrap_servers,
+      topic: config.topic,
+      group_id: config.group_id,
+      message_timeout_ms: config.message_timeout_ms,
+      request_timeout_ms: config.request_timeout_ms,
+      retry_backoff_ms: config.retry_backoff_ms,
+      retries: config.retries,
+      auto_offset_reset: config.auto_offset_reset,
+      enable_auto_commit: config.enable_auto_commit,
+      auto_commit_interval_ms: config.auto_commit_interval_ms,
+    });
+    setShowConfigForm(true);
+  };
+
+  const deleteConfig = async (configId) => {
+    if (!window.confirm('Are you sure you want to delete this configuration?')) {
+      return;
+    }
+
+    try {
+      const response = await axios.delete(`/api/config/${configId}`);
+      if (response.data.success) {
+        loadConfigs();
+        loadActiveConfigs();
+      }
+    } catch (error) {
+      console.error('Failed to delete config:', error);
+    }
+  };
+
+  const toggleConfigActive = async (configId, isActive) => {
+    try {
+      const response = await axios.post(`/api/config/${configId}/toggle`, { is_active: isActive });
+      if (response.data.success) {
+        loadConfigs();
+        loadActiveConfigs();
+        loadConfig(); // Reload main config if it changed
+      }
+    } catch (error) {
+      console.error('Failed to toggle config:', error);
+    }
+  };
+
   const activateConfig = async (configId) => {
     try {
       const response = await axios.post(`/api/config/${configId}/activate`);
       if (response.data.success) {
         loadConfig();
         loadConfigs();
+        loadActiveConfigs();
       }
     } catch (error) {
       console.error('Failed to activate config:', error);
     }
+  };
+
+  const showTooltip = (event, config) => {
+    const rect = event.target.getBoundingClientRect();
+    setTooltip({
+      show: true,
+      content: config,
+      x: rect.left + rect.width / 2,
+      y: rect.top - 10
+    });
+  };
+
+  const hideTooltip = () => {
+    setTooltip({ show: false, content: '', x: 0, y: 0 });
+  };
+
+  const cancelEdit = () => {
+    setShowConfigForm(false);
+    setEditingConfig(null);
+    setSaveResult(null);
+    resetConfigForm();
   };
 
   return (
@@ -134,20 +230,35 @@ function App() {
       </header>
 
       <main className="main-content">
-        {/* Current Configuration Section */}
+        {/* Active Configurations Section */}
         <section className="card">
-          <h2>📡 Current Active Configuration</h2>
-          <div className="config-display">
-            <div className="config-item">
-              <strong>Bootstrap Servers:</strong> {config.bootstrap_servers}
+          <h2>📡 Active Kafka Configurations ({activeConfigs.length})</h2>
+          {activeConfigs.length === 0 ? (
+            <div className="no-configs">
+              <p>No active configurations. Please activate at least one configuration to use Kafka.</p>
             </div>
-            <div className="config-item">
-              <strong>Topic:</strong> {config.topic}
+          ) : (
+            <div className="active-configs-list">
+              {activeConfigs.map((cfg) => (
+                <div key={cfg.id} className="active-config-badge">
+                  <span 
+                    className="config-name"
+                    onMouseEnter={(e) => showTooltip(e, cfg)}
+                    onMouseLeave={hideTooltip}
+                  >
+                    {cfg.name}
+                  </span>
+                  <button 
+                    onClick={() => toggleConfigActive(cfg.id, false)}
+                    className="deactivate-btn"
+                    title="Deactivate this configuration"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
             </div>
-            <div className="config-item">
-              <strong>Group ID:</strong> {config.group_id}
-            </div>
-          </div>
+          )}
         </section>
 
         {/* Connectivity Test Section */}
@@ -217,16 +328,26 @@ function App() {
         <section className="card">
           <h2>⚙️ Configuration Management</h2>
           
-          <button 
-            onClick={() => setShowConfigForm(!showConfigForm)}
-            className="btn btn-primary"
-          >
-            {showConfigForm ? 'Cancel' : 'Add New Configuration'}
-          </button>
+          <div className="config-actions">
+            <button 
+              onClick={() => setShowConfigForm(!showConfigForm)}
+              className="btn btn-primary"
+            >
+              {showConfigForm ? 'Cancel' : 'Add New Configuration'}
+            </button>
+            {showConfigForm && editingConfig && (
+              <button 
+                onClick={cancelEdit}
+                className="btn btn-secondary"
+              >
+                Cancel Edit
+              </button>
+            )}
+          </div>
 
           {showConfigForm && (
             <div className="config-form">
-              <h3>Create New Configuration</h3>
+              <h3>{editingConfig ? 'Edit Configuration' : 'Create New Configuration'}</h3>
               <div className="form-grid">
                 <div className="form-row">
                   <label>Name:</label>
@@ -274,7 +395,7 @@ function App() {
               </div>
               
               <button onClick={saveConfig} className="btn btn-primary">
-                Save Configuration
+                {editingConfig ? 'Update Configuration' : 'Save Configuration'}
               </button>
 
               {saveResult && (
@@ -302,14 +423,35 @@ function App() {
                       <p><strong>Group:</strong> {cfg.group_id}</p>
                       <p><strong>Created:</strong> {new Date(cfg.created_at).toLocaleDateString()}</p>
                     </div>
-                    {!cfg.is_active && (
+                    <div className="config-actions">
                       <button 
-                        onClick={() => activateConfig(cfg.id)}
+                        onClick={() => toggleConfigActive(cfg.id, !cfg.is_active)}
+                        className={`btn btn-sm ${cfg.is_active ? 'btn-warning' : 'btn-success'}`}
+                      >
+                        {cfg.is_active ? 'Deactivate' : 'Activate'}
+                      </button>
+                      <button 
+                        onClick={() => startEditConfig(cfg)}
                         className="btn btn-secondary btn-sm"
                       >
-                        Activate
+                        Edit
                       </button>
-                    )}
+                      <button 
+                        onClick={() => deleteConfig(cfg.id)}
+                        className="btn btn-danger btn-sm"
+                      >
+                        Delete
+                      </button>
+                      {!cfg.is_active && (
+                        <button 
+                          onClick={() => activateConfig(cfg.id)}
+                          className="btn btn-primary btn-sm"
+                          title="Activate only this configuration (deactivate others)"
+                        >
+                          Set as Only Active
+                        </button>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -317,6 +459,29 @@ function App() {
           )}
         </section>
       </main>
+
+      {/* Tooltip */}
+      {tooltip.show && (
+        <div 
+          className="tooltip"
+          style={{
+            left: tooltip.x,
+            top: tooltip.y,
+            transform: 'translateX(-50%) translateY(-100%)'
+          }}
+        >
+          <div className="tooltip-content">
+            <h4>{tooltip.content.name}</h4>
+            <p><strong>Server:</strong> {tooltip.content.bootstrap_servers}</p>
+            <p><strong>Topic:</strong> {tooltip.content.topic}</p>
+            <p><strong>Group:</strong> {tooltip.content.group_id}</p>
+            <p><strong>Timeout:</strong> {tooltip.content.message_timeout_ms}ms</p>
+            <p><strong>Retries:</strong> {tooltip.content.retries}</p>
+            <p><strong>Offset Reset:</strong> {tooltip.content.auto_offset_reset}</p>
+            <p><strong>Auto Commit:</strong> {tooltip.content.enable_auto_commit ? 'Yes' : 'No'}</p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

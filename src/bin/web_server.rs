@@ -3,7 +3,7 @@ use axum::{
     extract::{Json, Query, State},
     http::StatusCode,
     response::Json as ResponseJson,
-    routing::{get, post},
+    routing::{delete, get, post, put},
     Router,
 };
 use log::{info, error};
@@ -60,6 +60,26 @@ struct SaveConfigResponse {
 struct ConfigListResponse {
     success: bool,
     configs: Vec<serde_json::Value>,
+}
+
+#[derive(Deserialize)]
+struct UpdateConfigRequest {
+    name: String,
+    bootstrap_servers: String,
+    topic: String,
+    group_id: String,
+    message_timeout_ms: Option<i32>,
+    request_timeout_ms: Option<i32>,
+    retry_backoff_ms: Option<i32>,
+    retries: Option<i32>,
+    auto_offset_reset: Option<String>,
+    enable_auto_commit: Option<bool>,
+    auto_commit_interval_ms: Option<i32>,
+}
+
+#[derive(Deserialize)]
+struct ToggleConfigRequest {
+    is_active: bool,
 }
 
 #[derive(Deserialize)]
@@ -150,9 +170,13 @@ async fn main() -> Result<()> {
         .route("/api/test-connectivity", get(test_connectivity))
         .route("/api/config", get(get_config))
         .route("/api/configs", get(list_configs))
+        .route("/api/configs/active", get(get_active_configs))
         .route("/api/consume-messages", get(consume_messages))
         .route("/api/config", post(save_config))
+        .route("/api/config/:id", put(update_config))
+        .route("/api/config/:id", delete(delete_config))
         .route("/api/config/:id/activate", post(activate_config))
+        .route("/api/config/:id/toggle", post(toggle_config))
         .nest_service("/", ServeDir::new("frontend/dist"))
         .layer(
             ServiceBuilder::new()
@@ -294,11 +318,183 @@ async fn list_configs(
     }
 }
 
+async fn get_active_configs(
+    State(state): State<Arc<AppState>>,
+) -> Result<ResponseJson<ConfigListResponse>, StatusCode> {
+    info!("Getting active Kafka configurations");
+
+    match state.database.get_active_kafka_configs().await {
+        Ok(configs) => {
+            let configs_json: Vec<serde_json::Value> = configs
+                .into_iter()
+                .map(|config| serde_json::to_value(config).unwrap_or(serde_json::Value::Null))
+                .collect();
+                
+            Ok(ResponseJson(ConfigListResponse {
+                success: true,
+                configs: configs_json,
+            }))
+        }
+        Err(e) => {
+            error!("❌ Failed to get active configurations: {}", e);
+            Ok(ResponseJson(ConfigListResponse {
+                success: false,
+                configs: vec![],
+            }))
+        }
+    }
+}
+
+async fn update_config(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+    Json(request): Json<UpdateConfigRequest>,
+) -> Result<ResponseJson<serde_json::Value>, StatusCode> {
+    info!("Updating Kafka configuration: {}", id);
+
+    let config_id = match uuid::Uuid::parse_str(&id) {
+        Ok(uuid) => uuid,
+        Err(e) => {
+            error!("Invalid UUID format: {}", e);
+            return Ok(ResponseJson(serde_json::json!({
+                "success": false,
+                "message": "Invalid configuration ID format"
+            })));
+        }
+    };
+
+    // Get existing config to preserve is_active and timestamps
+    let existing_config = match state.database.get_kafka_config_by_id(config_id).await {
+        Ok(Some(config)) => config,
+        Ok(None) => {
+            return Ok(ResponseJson(serde_json::json!({
+                "success": false,
+                "message": "Configuration not found"
+            })));
+        }
+        Err(e) => {
+            error!("❌ Failed to get existing configuration: {}", e);
+            return Ok(ResponseJson(serde_json::json!({
+                "success": false,
+                "message": format!("Failed to get configuration: {}", e)
+            })));
+        }
+    };
+
+    // Create updated config
+    let updated_config = alerts::KafkaConfigRow {
+        id: config_id,
+        name: request.name,
+        bootstrap_servers: request.bootstrap_servers,
+        topic: request.topic,
+        group_id: request.group_id,
+        message_timeout_ms: request.message_timeout_ms.unwrap_or(5000),
+        request_timeout_ms: request.request_timeout_ms.unwrap_or(5000),
+        retry_backoff_ms: request.retry_backoff_ms.unwrap_or(100),
+        retries: request.retries.unwrap_or(3),
+        auto_offset_reset: request.auto_offset_reset.unwrap_or_else(|| "earliest".to_string()),
+        enable_auto_commit: request.enable_auto_commit.unwrap_or(true),
+        auto_commit_interval_ms: request.auto_commit_interval_ms.unwrap_or(1000),
+        is_active: existing_config.is_active,
+        created_at: existing_config.created_at,
+        updated_at: chrono::Utc::now(),
+    };
+
+    match state.database.update_kafka_config(config_id, &updated_config).await {
+        Ok(_) => {
+            info!("✅ Configuration updated successfully: {}", id);
+            Ok(ResponseJson(serde_json::json!({
+                "success": true,
+                "message": "Configuration updated successfully"
+            })))
+        }
+        Err(e) => {
+            error!("❌ Failed to update configuration: {}", e);
+            Ok(ResponseJson(serde_json::json!({
+                "success": false,
+                "message": format!("Failed to update configuration: {}", e)
+            })))
+        }
+    }
+}
+
+async fn delete_config(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> Result<ResponseJson<serde_json::Value>, StatusCode> {
+    info!("Deleting Kafka configuration: {}", id);
+
+    let config_id = match uuid::Uuid::parse_str(&id) {
+        Ok(uuid) => uuid,
+        Err(e) => {
+            error!("Invalid UUID format: {}", e);
+            return Ok(ResponseJson(serde_json::json!({
+                "success": false,
+                "message": "Invalid configuration ID format"
+            })));
+        }
+    };
+
+    match state.database.delete_kafka_config(config_id).await {
+        Ok(_) => {
+            info!("✅ Configuration deleted successfully: {}", id);
+            Ok(ResponseJson(serde_json::json!({
+                "success": true,
+                "message": "Configuration deleted successfully"
+            })))
+        }
+        Err(e) => {
+            error!("❌ Failed to delete configuration: {}", e);
+            Ok(ResponseJson(serde_json::json!({
+                "success": false,
+                "message": format!("Failed to delete configuration: {}", e)
+            })))
+        }
+    }
+}
+
+async fn toggle_config(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+    Json(request): Json<ToggleConfigRequest>,
+) -> Result<ResponseJson<serde_json::Value>, StatusCode> {
+    info!("Toggling Kafka configuration: {} to {}", id, request.is_active);
+
+    let config_id = match uuid::Uuid::parse_str(&id) {
+        Ok(uuid) => uuid,
+        Err(e) => {
+            error!("Invalid UUID format: {}", e);
+            return Ok(ResponseJson(serde_json::json!({
+                "success": false,
+                "message": "Invalid configuration ID format"
+            })));
+        }
+    };
+
+    match state.database.toggle_kafka_config_active(config_id, request.is_active).await {
+        Ok(_) => {
+            let action = if request.is_active { "activated" } else { "deactivated" };
+            info!("✅ Configuration {} successfully: {}", action, id);
+            Ok(ResponseJson(serde_json::json!({
+                "success": true,
+                "message": format!("Configuration {} successfully", action)
+            })))
+        }
+        Err(e) => {
+            error!("❌ Failed to toggle configuration: {}", e);
+            Ok(ResponseJson(serde_json::json!({
+                "success": false,
+                "message": format!("Failed to toggle configuration: {}", e)
+            })))
+        }
+    }
+}
+
 async fn activate_config(
     State(state): State<Arc<AppState>>,
     axum::extract::Path(id): axum::extract::Path<String>,
 ) -> Result<ResponseJson<serde_json::Value>, StatusCode> {
-    info!("Activating Kafka configuration: {}", id);
+    info!("Activating Kafka configuration (single active): {}", id);
 
     let config_id = match uuid::Uuid::parse_str(&id) {
         Ok(uuid) => uuid,
@@ -313,10 +509,10 @@ async fn activate_config(
 
     match state.database.set_active_kafka_config(config_id).await {
         Ok(_) => {
-            info!("✅ Configuration activated successfully: {}", id);
+            info!("✅ Configuration activated successfully (single active): {}", id);
             Ok(ResponseJson(serde_json::json!({
                 "success": true,
-                "message": "Configuration activated successfully"
+                "message": "Configuration activated successfully (all others deactivated)"
             })))
         }
         Err(e) => {

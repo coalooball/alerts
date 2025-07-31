@@ -253,6 +253,137 @@
   font-size: 0.9rem;
 }
 
+.btn-success {
+  background: #38a169;
+  color: white;
+}
+
+.btn-success:hover:not(:disabled) {
+  background: #2f855a;
+  transform: translateY(-1px);
+}
+
+.btn-warning {
+  background: #d69e2e;
+  color: white;
+}
+
+.btn-warning:hover:not(:disabled) {
+  background: #b7791f;
+  transform: translateY(-1px);
+}
+
+.btn-danger {
+  background: #e53e3e;
+  color: white;
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: #c53030;
+  transform: translateY(-1px);
+}
+
+.active-configs-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.active-config-badge {
+  display: flex;
+  align-items: center;
+  background: #38a169;
+  color: white;
+  padding: 0.5rem 0.75rem;
+  border-radius: 20px;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.config-name {
+  cursor: pointer;
+  margin-right: 0.5rem;
+}
+
+.deactivate-btn {
+  background: none;
+  border: none;
+  color: white;
+  font-size: 1.2rem;
+  cursor: pointer;
+  padding: 0;
+  margin-left: 0.25rem;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.2s;
+}
+
+.deactivate-btn:hover {
+  background-color: rgba(255, 255, 255, 0.2);
+}
+
+.no-configs {
+  text-align: center;
+  padding: 2rem;
+  color: #666;
+  font-style: italic;
+}
+
+.config-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-top: 1rem;
+}
+
+.tooltip {
+  position: fixed;
+  z-index: 1000;
+  pointer-events: none;
+}
+
+.tooltip-content {
+  background: #2d3748;
+  color: white;
+  padding: 1rem;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  max-width: 300px;
+  font-size: 0.9rem;
+}
+
+.tooltip-content h4 {
+  margin: 0 0 0.5rem 0;
+  color: #63b3ed;
+  font-size: 1rem;
+}
+
+.tooltip-content p {
+  margin: 0.25rem 0;
+  line-height: 1.4;
+}
+
+/* Animation for tooltip */
+.tooltip {
+  animation: fadeIn 0.2s ease-in-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-90%);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(-100%);
+  }
+}
+
 .message-form {
   display: grid;
   gap: 1.5rem;

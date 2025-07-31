@@ -44,6 +44,14 @@ impl DatabaseConfig {
             self.username, self.password, self.host, self.port, self.database
         )
     }
+
+    // 连接到默认数据库（通常是postgres）的连接字符串
+    pub fn default_connection_string(&self) -> String {
+        format!(
+            "postgres://{}:{}@{}:{}/postgres",
+            self.username, self.password, self.host, self.port
+        )
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
@@ -71,7 +79,41 @@ pub struct Database {
 
 impl Database {
     pub async fn new(config: DatabaseConfig) -> Result<Self> {
+        // 首先连接到默认数据库（postgres）来检查目标数据库是否存在
+        log::info!("🔍 Checking if database '{}' exists...", config.database);
+        
+        let default_pool = PgPool::connect(&config.default_connection_string()).await?;
+        
+        // 检查目标数据库是否存在
+        let db_exists: bool = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM pg_database WHERE datname = $1)"
+        )
+        .bind(&config.database)
+        .fetch_one(&default_pool)
+        .await?;
+
+        if !db_exists {
+            log::info!("📝 Database '{}' does not exist, creating it...", config.database);
+            
+            // 创建数据库
+            sqlx::query(&format!("CREATE DATABASE \"{}\"", config.database))
+                .execute(&default_pool)
+                .await
+                .map_err(|e| anyhow::anyhow!("Failed to create database '{}': {}", config.database, e))?;
+            
+            log::info!("✅ Database '{}' created successfully", config.database);
+        } else {
+            log::info!("✅ Database '{}' already exists", config.database);
+        }
+
+        // 关闭默认连接池
+        default_pool.close().await;
+
+        // 连接到目标数据库
+        log::info!("🔗 Connecting to database '{}'...", config.database);
         let pool = PgPool::connect(&config.connection_string()).await?;
+        
+        log::info!("✅ Successfully connected to database '{}'", config.database);
         Ok(Self { pool })
     }
 
@@ -97,23 +139,14 @@ impl Database {
 
         log::info!("📄 Reading initialization script from {}", init_sql_path);
         
-        // Split SQL content by statements and execute each one
-        // Note: This is a simple approach that works for most cases
-        let statements: Vec<&str> = sql_content
-            .split(';')
-            .map(|s| s.trim())
-            .filter(|s| !s.is_empty() && !s.starts_with("--"))
-            .collect();
-
-        for statement in statements {
-            if !statement.trim().is_empty() {
-                log::debug!("Executing SQL: {}", statement);
-                sqlx::query(statement)
-                    .execute(&self.pool)
-                    .await
-                    .map_err(|e| anyhow::anyhow!("Failed to execute SQL statement: {} - Error: {}", statement, e))?;
-            }
-        }
+        // Use raw connection to execute the entire SQL script
+        let mut conn = self.pool.acquire().await?;
+        
+        log::debug!("Executing complete SQL script with raw connection");
+        sqlx::raw_sql(&sql_content)
+            .execute(&mut *conn)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to execute init.sql: {}", e))?;
 
         log::info!("✅ Database schema initialized from init.sql");
 
@@ -122,12 +155,22 @@ impl Database {
 
     pub async fn get_active_kafka_config(&self) -> Result<Option<KafkaConfigRow>> {
         let row = sqlx::query_as::<_, KafkaConfigRow>(
-            "SELECT * FROM kafka_configs WHERE is_active = true LIMIT 1"
+            "SELECT * FROM kafka_configs WHERE is_active = true ORDER BY created_at ASC LIMIT 1"
         )
         .fetch_optional(&self.pool)
         .await?;
 
         Ok(row)
+    }
+
+    pub async fn get_active_kafka_configs(&self) -> Result<Vec<KafkaConfigRow>> {
+        let rows = sqlx::query_as::<_, KafkaConfigRow>(
+            "SELECT * FROM kafka_configs WHERE is_active = true ORDER BY created_at ASC"
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows)
     }
 
     pub async fn get_kafka_config_by_name(&self, name: &str) -> Result<Option<KafkaConfigRow>> {
@@ -222,6 +265,36 @@ impl Database {
             .await?;
 
         Ok(())
+    }
+
+    pub async fn toggle_kafka_config_active(&self, id: uuid::Uuid, is_active: bool) -> Result<()> {
+        sqlx::query("UPDATE kafka_configs SET is_active = $1 WHERE id = $2")
+            .bind(is_active)
+            .bind(&id)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(())
+    }
+
+    pub async fn delete_kafka_config(&self, id: uuid::Uuid) -> Result<()> {
+        sqlx::query("DELETE FROM kafka_configs WHERE id = $1")
+            .bind(&id)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(())
+    }
+
+    pub async fn get_kafka_config_by_id(&self, id: uuid::Uuid) -> Result<Option<KafkaConfigRow>> {
+        let row = sqlx::query_as::<_, KafkaConfigRow>(
+            "SELECT * FROM kafka_configs WHERE id = $1"
+        )
+        .bind(&id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row)
     }
 
     pub async fn list_kafka_configs(&self) -> Result<Vec<KafkaConfigRow>> {
