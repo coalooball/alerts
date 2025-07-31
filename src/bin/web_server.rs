@@ -12,11 +12,13 @@ use std::sync::Arc;
 use tower::ServiceBuilder;
 use tower_http::{cors::CorsLayer, services::ServeDir};
 
-use alerts::{AlertMessage, EdrAlert, NgavAlert, KafkaConfig, KafkaProducer};
+use alerts::{AlertMessage, KafkaConfig, KafkaProducer, Database, DatabaseConfig};
+use alerts::kafka::config::{KafkaProducerConfig, KafkaConsumerConfig};
 
 #[derive(Clone)]
 struct AppState {
     config: KafkaConfig,
+    database: Arc<Database>,
 }
 
 #[derive(Deserialize)]
@@ -33,17 +35,31 @@ struct ConnectivityResponse {
 }
 
 #[derive(Deserialize)]
-struct SendMessageRequest {
-    message_type: String, // "alert", "edr", "ngav"
-    data: serde_json::Value,
-    topic: Option<String>,
+struct SaveConfigRequest {
+    name: String,
+    bootstrap_servers: String,
+    topic: String,
+    group_id: String,
+    message_timeout_ms: Option<i32>,
+    request_timeout_ms: Option<i32>,
+    retry_backoff_ms: Option<i32>,
+    retries: Option<i32>,
+    auto_offset_reset: Option<String>,
+    enable_auto_commit: Option<bool>,
+    auto_commit_interval_ms: Option<i32>,
 }
 
 #[derive(Serialize)]
-struct SendMessageResponse {
+struct SaveConfigResponse {
     success: bool,
     message: String,
-    message_id: Option<String>,
+    config_id: Option<String>,
+}
+
+#[derive(Serialize)]
+struct ConfigListResponse {
+    success: bool,
+    configs: Vec<serde_json::Value>,
 }
 
 #[derive(Deserialize)]
@@ -78,27 +94,65 @@ async fn main() -> Result<()> {
 
     info!("🚀 Starting Kafka Alerts Web Server");
 
-    // Load configuration
-    let config = match KafkaConfig::from_file("config.toml") {
+    // Initialize database connection
+    let db_config = DatabaseConfig::from_env();
+    info!("📊 Connecting to database at {}:{}...", db_config.host, db_config.port);
+    
+    let database = match Database::new(db_config).await {
+        Ok(db) => {
+            info!("✅ Database connection established");
+            
+            // Initialize database schema
+            if let Err(e) = db.initialize_schema().await {
+                error!("❌ Failed to initialize database schema: {}", e);
+                return Err(e);
+            }
+            
+            Arc::new(db)
+        }
+        Err(e) => {
+            error!("❌ Failed to connect to database: {}", e);
+            error!("Please ensure PostgreSQL is running with database 'alert_server'");
+            return Err(e);
+        }
+    };
+
+    // Test database connection
+    match database.test_connection().await {
+        Ok(true) => info!("✅ Database connectivity test passed"),
+        Ok(false) => {
+            error!("❌ Database connectivity test failed");
+            return Err(anyhow::anyhow!("Database connectivity test failed"));
+        }
+        Err(e) => {
+            error!("❌ Database connectivity test error: {}", e);
+            return Err(e);
+        }
+    }
+
+    // Load Kafka configuration from database
+    let config = match KafkaConfig::from_database().await {
         Ok(config) => {
-            info!("✅ Loaded configuration from config.toml");
+            info!("✅ Loaded Kafka configuration from database");
             info!("📡 Kafka broker: {}", config.bootstrap_servers);
             info!("📂 Topic: {}", config.topic);
             config
         }
         Err(e) => {
-            info!("Failed to load config: {}. Using default configuration.", e);
+            info!("Failed to load config from database: {}. Using default configuration.", e);
             KafkaConfig::default()
         }
     };
 
-    let state = AppState { config };
+    let state = AppState { config, database };
 
     let app = Router::new()
         .route("/api/test-connectivity", get(test_connectivity))
-        .route("/api/send-message", post(send_message))
-        .route("/api/consume-messages", get(consume_messages))
         .route("/api/config", get(get_config))
+        .route("/api/configs", get(list_configs))
+        .route("/api/consume-messages", get(consume_messages))
+        .route("/api/config", post(save_config))
+        .route("/api/config/:id/activate", post(activate_config))
         .nest_service("/", ServeDir::new("frontend/dist"))
         .layer(
             ServiceBuilder::new()
@@ -168,86 +222,109 @@ async fn test_kafka_connection(config: &KafkaConfig) -> Result<serde_json::Value
     Ok(serde_json::Value::Object(details))
 }
 
-async fn send_message(
+async fn save_config(
     State(state): State<Arc<AppState>>,
-    Json(request): Json<SendMessageRequest>,
-) -> Result<ResponseJson<SendMessageResponse>, StatusCode> {
-    info!("Sending {} message to Kafka", request.message_type);
+    Json(request): Json<SaveConfigRequest>,
+) -> Result<ResponseJson<SaveConfigResponse>, StatusCode> {
+    info!("Saving Kafka configuration: {}", request.name);
 
-    let mut config = state.config.clone();
-    if let Some(topic) = request.topic {
-        config.topic = topic;
-    }
-
-    let producer = match KafkaProducer::new(config).await {
-        Ok(producer) => producer,
-        Err(e) => {
-            error!("Failed to create Kafka producer: {}", e);
-            return Ok(ResponseJson(SendMessageResponse {
-                success: false,
-                message: format!("Failed to create producer: {}", e),
-                message_id: None,
-            }));
-        }
+    let kafka_config = KafkaConfig {
+        bootstrap_servers: request.bootstrap_servers,
+        topic: request.topic,
+        group_id: request.group_id,
+        producer: KafkaProducerConfig {
+            message_timeout_ms: request.message_timeout_ms.unwrap_or(5000) as u32,
+            request_timeout_ms: request.request_timeout_ms.unwrap_or(5000) as u32,
+            retry_backoff_ms: request.retry_backoff_ms.unwrap_or(100) as u32,
+            retries: request.retries.unwrap_or(3) as u32,
+        },
+        consumer: KafkaConsumerConfig {
+            auto_offset_reset: request.auto_offset_reset.unwrap_or_else(|| "earliest".to_string()),
+            enable_auto_commit: request.enable_auto_commit.unwrap_or(true),
+            auto_commit_interval_ms: request.auto_commit_interval_ms.unwrap_or(1000) as u32,
+        },
     };
 
-    let message_id = format!("{}-{}", request.message_type, chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0));
-
-    let result = match request.message_type.as_str() {
-        "alert" => {
-            match serde_json::from_value::<AlertMessage>(request.data.clone()) {
-                Ok(alert) => producer.send_alert(alert).await,
-                Err(_) => {
-                    let alert = AlertMessage::info(message_id.clone(), request.data.to_string());
-                    producer.send_alert(alert).await
-                }
-            }
-        }
-        "edr" => {
-            match serde_json::from_value::<EdrAlert>(request.data) {
-                Ok(edr_alert) => producer.send_edr_alert(edr_alert).await,
-                Err(e) => return Ok(ResponseJson(SendMessageResponse {
-                    success: false,
-                    message: format!("Invalid EDR alert format: {}", e),
-                    message_id: None,
-                })),
-            }
-        }
-        "ngav" => {
-            match serde_json::from_value::<NgavAlert>(request.data) {
-                Ok(ngav_alert) => producer.send_ngav_alert(ngav_alert).await,
-                Err(e) => return Ok(ResponseJson(SendMessageResponse {
-                    success: false,
-                    message: format!("Invalid NGAV alert format: {}", e),
-                    message_id: None,
-                })),
-            }
-        }
-        _ => {
-            return Ok(ResponseJson(SendMessageResponse {
-                success: false,
-                message: "Invalid message type. Use 'alert', 'edr', or 'ngav'".to_string(),
-                message_id: None,
-            }));
-        }
-    };
-
-    match result {
-        Ok(_) => {
-            info!("✅ Message sent successfully: {}", message_id);
-            Ok(ResponseJson(SendMessageResponse {
+    let config_row = kafka_config.to_database_row(request.name, false);
+    
+    match state.database.create_kafka_config(&config_row).await {
+        Ok(id) => {
+            info!("✅ Configuration saved successfully: {}", id);
+            Ok(ResponseJson(SaveConfigResponse {
                 success: true,
-                message: "Message sent successfully".to_string(),
-                message_id: Some(message_id),
+                message: "Configuration saved successfully".to_string(),
+                config_id: Some(id.to_string()),
             }))
         }
         Err(e) => {
-            error!("❌ Failed to send message: {}", e);
-            Ok(ResponseJson(SendMessageResponse {
+            error!("❌ Failed to save configuration: {}", e);
+            Ok(ResponseJson(SaveConfigResponse {
                 success: false,
-                message: format!("Failed to send message: {}", e),
-                message_id: None,
+                message: format!("Failed to save configuration: {}", e),
+                config_id: None,
             }))
+        }
+    }
+}
+
+async fn list_configs(
+    State(state): State<Arc<AppState>>,
+) -> Result<ResponseJson<ConfigListResponse>, StatusCode> {
+    info!("Listing Kafka configurations");
+
+    match state.database.list_kafka_configs().await {
+        Ok(configs) => {
+            let configs_json: Vec<serde_json::Value> = configs
+                .into_iter()
+                .map(|config| serde_json::to_value(config).unwrap_or(serde_json::Value::Null))
+                .collect();
+                
+            Ok(ResponseJson(ConfigListResponse {
+                success: true,
+                configs: configs_json,
+            }))
+        }
+        Err(e) => {
+            error!("❌ Failed to list configurations: {}", e);
+            Ok(ResponseJson(ConfigListResponse {
+                success: false,
+                configs: vec![],
+            }))
+        }
+    }
+}
+
+async fn activate_config(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> Result<ResponseJson<serde_json::Value>, StatusCode> {
+    info!("Activating Kafka configuration: {}", id);
+
+    let config_id = match uuid::Uuid::parse_str(&id) {
+        Ok(uuid) => uuid,
+        Err(e) => {
+            error!("Invalid UUID format: {}", e);
+            return Ok(ResponseJson(serde_json::json!({
+                "success": false,
+                "message": "Invalid configuration ID format"
+            })));
+        }
+    };
+
+    match state.database.set_active_kafka_config(config_id).await {
+        Ok(_) => {
+            info!("✅ Configuration activated successfully: {}", id);
+            Ok(ResponseJson(serde_json::json!({
+                "success": true,
+                "message": "Configuration activated successfully"
+            })))
+        }
+        Err(e) => {
+            error!("❌ Failed to activate configuration: {}", e);
+            Ok(ResponseJson(serde_json::json!({
+                "success": false,
+                "message": format!("Failed to activate configuration: {}", e)
+            })))
         }
     }
 }

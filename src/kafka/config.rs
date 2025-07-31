@@ -1,6 +1,7 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::fs;
+use crate::database::{Database, DatabaseConfig, KafkaConfigRow};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct KafkaProducerConfig {
@@ -36,6 +37,69 @@ impl KafkaConfig {
         let contents = fs::read_to_string(path)?;
         let config: Config = toml::from_str(&contents)?;
         Ok(config.kafka)
+    }
+
+    pub async fn from_database() -> Result<Self> {
+        let db_config = DatabaseConfig::from_env();
+        let database = Database::new(db_config).await?;
+        
+        if let Some(config_row) = database.get_active_kafka_config().await? {
+            Ok(Self::from_database_row(&config_row))
+        } else {
+            // If no active config found, return default
+            Ok(Self::default())
+        }
+    }
+
+    pub async fn from_database_by_name(name: &str) -> Result<Option<Self>> {
+        let db_config = DatabaseConfig::from_env();
+        let database = Database::new(db_config).await?;
+        
+        if let Some(config_row) = database.get_kafka_config_by_name(name).await? {
+            Ok(Some(Self::from_database_row(&config_row)))
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn from_database_row(row: &KafkaConfigRow) -> Self {
+        Self {
+            bootstrap_servers: row.bootstrap_servers.clone(),
+            topic: row.topic.clone(),
+            group_id: row.group_id.clone(),
+            producer: KafkaProducerConfig {
+                message_timeout_ms: row.message_timeout_ms as u32,
+                request_timeout_ms: row.request_timeout_ms as u32,
+                retry_backoff_ms: row.retry_backoff_ms as u32,
+                retries: row.retries as u32,
+            },
+            consumer: KafkaConsumerConfig {
+                auto_offset_reset: row.auto_offset_reset.clone(),
+                enable_auto_commit: row.enable_auto_commit,
+                auto_commit_interval_ms: row.auto_commit_interval_ms as u32,
+            },
+        }
+    }
+
+    pub fn to_database_row(&self, name: String, is_active: bool) -> KafkaConfigRow {
+        let now = chrono::Utc::now();
+        KafkaConfigRow {
+            id: uuid::Uuid::new_v4(),
+            name,
+            bootstrap_servers: self.bootstrap_servers.clone(),
+            topic: self.topic.clone(),
+            group_id: self.group_id.clone(),
+            message_timeout_ms: self.producer.message_timeout_ms as i32,
+            request_timeout_ms: self.producer.request_timeout_ms as i32,
+            retry_backoff_ms: self.producer.retry_backoff_ms as i32,
+            retries: self.producer.retries as i32,
+            auto_offset_reset: self.consumer.auto_offset_reset.clone(),
+            enable_auto_commit: self.consumer.enable_auto_commit,
+            auto_commit_interval_ms: self.consumer.auto_commit_interval_ms as i32,
+            is_active,
+            created_at: now,
+            updated_at: now,
+        }
     }
 }
 

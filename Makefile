@@ -90,6 +90,18 @@ clean-frontend:
 	rm -rf frontend/dist
 	rm -rf frontend/node_modules
 
+# Database setup
+setup-db:
+	@echo "🐘 Setting up PostgreSQL database..."
+	@echo "1. Make sure PostgreSQL is running at 10.26.64.224:5432"
+	@echo "2. Create 'alert_server' database if it doesn't exist:"
+	@echo "   psql -U postgres -h 10.26.64.224 -c \"CREATE DATABASE alert_server;\""
+	@echo "3. The web server will automatically initialize tables on first startup"
+
+create-db:
+	@echo "🗄️ Creating alert_server database..."
+	psql -U postgres -h 10.26.64.224 -c "CREATE DATABASE alert_server;" || echo "Database may already exist"
+
 # Quick development workflow
 quick: dev-backend build-frontend start-dev
 
@@ -118,6 +130,10 @@ help:
 	@echo "Kafka tools:"
 	@echo "  kafka-producer - Start Kafka message sender"
 	@echo "  kafka-consumer - Start Kafka message consumer"
+	@echo ""
+	@echo "Database:"
+	@echo "  setup-db     - Setup PostgreSQL database (info only)"
+	@echo "  create-db    - Create alert_server database"
 	@echo ""
 	@echo "Cleanup:"
 	@echo "  clean        - Clean all build artifacts"

@@ -52,11 +52,12 @@ The Kafka components are organized in `src/kafka/`:
 
 ### Configuration
 
-Configuration is managed through `config.toml` with separate sections for producer and consumer settings:
-- Kafka broker settings (configurable, defaults vary by environment)
-- Producer timeouts and retry logic
-- Consumer offset and commit settings
-- Topic and consumer group configuration
+Configuration is now managed through a PostgreSQL database instead of config files:
+- **Database Connection**: PostgreSQL at 10.26.64.224:5432 (database: alert_server, user: postgres)  
+- **Kafka Settings**: Bootstrap servers, topics, consumer groups stored in `kafka_configs` table
+- **Producer/Consumer Options**: Timeouts, retry logic, offset management configurable per configuration
+- **Active Configuration**: Only one configuration can be active at a time
+- **Fallback**: Uses default configuration if no database config is found
 
 ### Security Dataset Structure
 
@@ -108,9 +109,11 @@ Axum-based web server with React frontend for Kafka management:
 
 The web server provides the following REST API endpoints:
 
-- `GET /api/config` - Get current Kafka configuration
+- `GET /api/config` - Get current active Kafka configuration
+- `GET /api/configs` - List all saved Kafka configurations  
+- `POST /api/config` - Save a new Kafka configuration
+- `POST /api/config/:id/activate` - Activate a specific configuration
 - `GET /api/test-connectivity` - Test Kafka connectivity with optional custom config
-- `POST /api/send-message` - Send alert messages to Kafka (supports alert, edr, ngav types)
 - `GET /api/consume-messages` - Consume latest messages from Kafka topic
 
 ## Frontend Development
@@ -122,7 +125,17 @@ The React frontend is located in `frontend/` directory:
 
 ## Runtime Requirements
 
-- Running Kafka instance (configured in config.toml)
-- For web server: built React frontend in `frontend/dist/` (served statically)
-- The application will fall back to sample alerts if dataset files are not found
-- Consumer runs in background task while producer sends alerts in main thread
+- **PostgreSQL Database**: Running at 10.26.64.224:5432 with `alert_server` database
+- **Database Schema**: Automatically initialized on first startup using `init.sql`
+- **Kafka Instance**: As configured in database (default: 10.26.64.224:9093)
+- **Frontend**: Built React app in `frontend/dist/` (served statically by web server)
+- The application will use default configuration if database connection fails
+
+## Database Initialization Process
+
+When the web server starts, it automatically:
+
+1. **Connects** to PostgreSQL at `10.26.64.224:5432/alert_server`
+2. **Checks** if `kafka_configs` table exists
+3. **Reads and executes** `init.sql` if tables don't exist (fails if `init.sql` not found)
+4. **Creates default** Kafka configuration (10.26.64.224:9093) as part of `init.sql`

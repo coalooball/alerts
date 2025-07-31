@@ -175,6 +175,84 @@
   font-size: 0.875rem;
 }
 
+.config-form {
+  margin-top: 1rem;
+  padding: 1.5rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f7fafc;
+}
+
+.form-grid {
+  display: grid;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.configs-list {
+  margin-top: 1.5rem;
+}
+
+.configs-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  margin-top: 1rem;
+}
+
+.config-card {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 1rem;
+  background: white;
+  transition: all 0.2s ease;
+}
+
+.config-card:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.config-card.active {
+  border-color: #4299e1;
+  background: #f0f8ff;
+}
+
+.config-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.config-header h4 {
+  margin: 0;
+  color: #2d3748;
+}
+
+.active-badge {
+  background: #38a169;
+  color: white;
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  font-weight: bold;
+}
+
+.config-details {
+  margin-bottom: 1rem;
+}
+
+.config-details p {
+  margin: 0.3rem 0;
+  font-size: 0.9rem;
+  color: #4a5568;
+}
+
+.btn-sm {
+  padding: 0.4rem 0.8rem;
+  font-size: 0.9rem;
+}
+
 .message-form {
   display: grid;
   gap: 1.5rem;

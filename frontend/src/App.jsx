@@ -4,6 +4,7 @@ import './App.css';
 
 function App() {
   const [config, setConfig] = useState({});
+  const [configs, setConfigs] = useState([]);
   const [connectivityTest, setConnectivityTest] = useState({
     loading: false,
     result: null,
@@ -13,20 +14,25 @@ function App() {
     bootstrap_servers: '',
     topic: ''
   });
-  const [messageForm, setMessageForm] = useState({
-    type: 'alert',
-    data: '',
-    topic: ''
+  const [newConfig, setNewConfig] = useState({
+    name: '',
+    bootstrap_servers: '',
+    topic: '',
+    group_id: '',
+    message_timeout_ms: 5000,
+    request_timeout_ms: 5000,
+    retry_backoff_ms: 100,
+    retries: 3,
+    auto_offset_reset: 'earliest',
+    enable_auto_commit: true,
+    auto_commit_interval_ms: 1000
   });
-  const [sendResult, setSendResult] = useState(null);
-  const [consumeResult, setConsumeResult] = useState({
-    loading: false,
-    messages: [],
-    error: null
-  });
+  const [showConfigForm, setShowConfigForm] = useState(false);
+  const [saveResult, setSaveResult] = useState(null);
 
   useEffect(() => {
     loadConfig();
+    loadConfigs();
   }, []);
 
   const loadConfig = async () => {
@@ -39,6 +45,17 @@ function App() {
       });
     } catch (error) {
       console.error('Failed to load config:', error);
+    }
+  };
+
+  const loadConfigs = async () => {
+    try {
+      const response = await axios.get('/api/configs');
+      if (response.data.success) {
+        setConfigs(response.data.configs);
+      }
+    } catch (error) {
+      console.error('Failed to load configs:', error);
     }
   };
 
@@ -66,98 +83,60 @@ function App() {
     }
   };
 
-  const sendMessage = async () => {
-    setSendResult(null);
+  const saveConfig = async () => {
+    setSaveResult(null);
     
     try {
-      let data;
-      try {
-        data = JSON.parse(messageForm.data);
-      } catch {
-        data = messageForm.data;
+      const response = await axios.post('/api/config', newConfig);
+      setSaveResult(response.data);
+      if (response.data.success) {
+        setShowConfigForm(false);
+        loadConfigs();
+        setNewConfig({
+          name: '',
+          bootstrap_servers: '',
+          topic: '',
+          group_id: '',
+          message_timeout_ms: 5000,
+          request_timeout_ms: 5000,
+          retry_backoff_ms: 100,
+          retries: 3,
+          auto_offset_reset: 'earliest',
+          enable_auto_commit: true,
+          auto_commit_interval_ms: 1000
+        });
       }
-      
-      const response = await axios.post('/api/send-message', {
-        message_type: messageForm.type,
-        data: data,
-        topic: messageForm.topic || undefined
-      });
-      
-      setSendResult(response.data);
     } catch (error) {
-      setSendResult({
+      setSaveResult({
         success: false,
         message: error.response?.data?.message || error.message
       });
     }
   };
 
-  const consumeMessages = async () => {
-    setConsumeResult({ loading: true, messages: [], error: null });
-    
+  const activateConfig = async (configId) => {
     try {
-      const response = await axios.get('/api/consume-messages', {
-        params: {
-          max_messages: 10,
-          timeout_ms: 5000
-        }
-      });
-      
-      setConsumeResult({
-        loading: false,
-        messages: response.data.messages || [],
-        error: null
-      });
+      const response = await axios.post(`/api/config/${configId}/activate`);
+      if (response.data.success) {
+        loadConfig();
+        loadConfigs();
+      }
     } catch (error) {
-      setConsumeResult({
-        loading: false,
-        messages: [],
-        error: error.response?.data?.message || error.message
-      });
-    }
-  };
-
-  const getExampleData = (type) => {
-    switch (type) {
-      case 'alert':
-        return JSON.stringify({
-          id: `alert-${Date.now()}`,
-          level: 'info',
-          message: 'Test alert message',
-          timestamp: new Date().toISOString()
-        }, null, 2);
-      case 'edr':
-        return JSON.stringify({
-          device_id: 'device-123',
-          threat_id: 'threat-456',
-          process_name: 'test.exe',
-          severity: 'medium',
-          timestamp: new Date().toISOString()
-        }, null, 2);
-      case 'ngav':
-        return JSON.stringify({
-          alert_id: 'ngav-789',
-          threat_type: 'malware',
-          file_path: '/tmp/test.exe',
-          blocked: true,
-          timestamp: new Date().toISOString()
-        }, null, 2);
-      default:
-        return '';
+      console.error('Failed to activate config:', error);
     }
   };
 
   return (
     <div className="app">
       <header className="app-header">
-        <h1>🚨 Kafka Alerts Dashboard</h1>
-        <p>Test Kafka connectivity and manage alert messages</p>
+        <h1>🚨 Kafka Configuration Dashboard</h1>
+        <p>Manage Kafka configurations and test connectivity</p>
       </header>
 
       <main className="main-content">
-        {/* Configuration Section */}
+        {/* Current Configuration Section */}
         <section className="card">
-          <h2>📡 Configuration</h2>
+          <h2>📡 Current Active Configuration</h2>
           <div className="config-display">
             <div className="config-item">
               <strong>Bootstrap Servers:</strong> {config.bootstrap_servers}
@@ -181,14 +160,14 @@ function App() {
               disabled={connectivityTest.loading}
               className="btn btn-primary"
             >
-              {connectivityTest.loading ? 'Testing...' : 'Test Default Config'}
+              {connectivityTest.loading ? 'Testing...' : 'Test Active Config'}
             </button>
             
             <div className="custom-config">
-              <h3>Custom Configuration</h3>
+              <h3>Test Custom Configuration</h3>
               <input
                 type="text"
-                placeholder="Bootstrap Servers"
+                placeholder="Bootstrap Servers (e.g., localhost:9092)"
                 value={customConfig.bootstrap_servers}
                 onChange={(e) => setCustomConfig({
                   ...customConfig,
@@ -234,111 +213,106 @@ function App() {
           )}
         </section>
 
-        {/* Send Message Section */}
+        {/* Configurations Management */}
         <section className="card">
-          <h2>📤 Send Message</h2>
+          <h2>⚙️ Configuration Management</h2>
           
-          <div className="message-form">
-            <div className="form-row">
-              <label>Message Type:</label>
-              <select
-                value={messageForm.type}
-                onChange={(e) => {
-                  setMessageForm({
-                    ...messageForm,
-                    type: e.target.value,
-                    data: getExampleData(e.target.value)
-                  });
-                }}
-                className="select"
-              >
-                <option value="alert">Alert</option>
-                <option value="edr">EDR Alert</option>
-                <option value="ngav">NGAV Alert</option>
-              </select>
-            </div>
-            
-            <div className="form-row">
-              <label>Topic (optional):</label>
-              <input
-                type="text"
-                placeholder="Leave empty to use default"
-                value={messageForm.topic}
-                onChange={(e) => setMessageForm({
-                  ...messageForm,
-                  topic: e.target.value
-                })}
-                className="input"
-              />
-            </div>
-            
-            <div className="form-row">
-              <label>Message Data (JSON):</label>
-              <textarea
-                value={messageForm.data}
-                onChange={(e) => setMessageForm({
-                  ...messageForm,
-                  data: e.target.value
-                })}
-                className="textarea"
-                rows="8"
-                placeholder="Enter JSON data..."
-              />
-            </div>
-            
-            <button onClick={sendMessage} className="btn btn-primary">
-              Send Message
-            </button>
-          </div>
+          <button 
+            onClick={() => setShowConfigForm(!showConfigForm)}
+            className="btn btn-primary"
+          >
+            {showConfigForm ? 'Cancel' : 'Add New Configuration'}
+          </button>
 
-          {sendResult && (
-            <div className={`result ${sendResult.success ? 'success' : 'error'}`}>
-              <h3>{sendResult.success ? '✅ Message Sent' : '❌ Send Failed'}</h3>
-              <p>{sendResult.message}</p>
-              {sendResult.message_id && (
-                <p><strong>Message ID:</strong> {sendResult.message_id}</p>
+          {showConfigForm && (
+            <div className="config-form">
+              <h3>Create New Configuration</h3>
+              <div className="form-grid">
+                <div className="form-row">
+                  <label>Name:</label>
+                  <input
+                    type="text"
+                    value={newConfig.name}
+                    onChange={(e) => setNewConfig({...newConfig, name: e.target.value})}
+                    className="input"
+                    placeholder="Configuration name"
+                  />
+                </div>
+                
+                <div className="form-row">
+                  <label>Bootstrap Servers:</label>
+                  <input
+                    type="text"
+                    value={newConfig.bootstrap_servers}
+                    onChange={(e) => setNewConfig({...newConfig, bootstrap_servers: e.target.value})}
+                    className="input"
+                    placeholder="localhost:9092"
+                  />
+                </div>
+                
+                <div className="form-row">
+                  <label>Topic:</label>
+                  <input
+                    type="text"
+                    value={newConfig.topic}
+                    onChange={(e) => setNewConfig({...newConfig, topic: e.target.value})}
+                    className="input"
+                    placeholder="alerts"
+                  />
+                </div>
+                
+                <div className="form-row">
+                  <label>Group ID:</label>
+                  <input
+                    type="text"
+                    value={newConfig.group_id}
+                    onChange={(e) => setNewConfig({...newConfig, group_id: e.target.value})}
+                    className="input"
+                    placeholder="alerts-consumer-group"
+                  />
+                </div>
+              </div>
+              
+              <button onClick={saveConfig} className="btn btn-primary">
+                Save Configuration
+              </button>
+
+              {saveResult && (
+                <div className={`result ${saveResult.success ? 'success' : 'error'}`}>
+                  <p>{saveResult.message}</p>
+                </div>
               )}
             </div>
           )}
-        </section>
 
-        {/* Consume Messages Section */}
-        <section className="card">
-          <h2>📥 Consume Messages</h2>
-          
-          <button 
-            onClick={consumeMessages}
-            disabled={consumeResult.loading}
-            className="btn btn-primary"
-          >
-            {consumeResult.loading ? 'Consuming...' : 'Consume Latest Messages'}
-          </button>
-
-          {consumeResult.error && (
-            <div className="result error">
-              <h3>❌ Error</h3>
-              <p>{consumeResult.error}</p>
-            </div>
-          )}
-
-          {consumeResult.messages.length > 0 && (
-            <div className="messages-list">
-              <h3>📨 Received Messages ({consumeResult.messages.length})</h3>
-              {consumeResult.messages.map((msg, index) => (
-                <div key={index} className="message-item">
-                  <div className="message-meta">
-                    <span>Partition: {msg.partition}</span>
-                    <span>Offset: {msg.offset}</span>
-                    {msg.timestamp && (
-                      <span>Time: {new Date(msg.timestamp).toLocaleString()}</span>
+          {/* Existing Configurations List */}
+          {configs.length > 0 && (
+            <div className="configs-list">
+              <h3>📋 Saved Configurations</h3>
+              <div className="configs-grid">
+                {configs.map((cfg) => (
+                  <div key={cfg.id} className={`config-card ${cfg.is_active ? 'active' : ''}`}>
+                    <div className="config-header">
+                      <h4>{cfg.name}</h4>
+                      {cfg.is_active && <span className="active-badge">Active</span>}
+                    </div>
+                    <div className="config-details">
+                      <p><strong>Server:</strong> {cfg.bootstrap_servers}</p>
+                      <p><strong>Topic:</strong> {cfg.topic}</p>
+                      <p><strong>Group:</strong> {cfg.group_id}</p>
+                      <p><strong>Created:</strong> {new Date(cfg.created_at).toLocaleDateString()}</p>
+                    </div>
+                    {!cfg.is_active && (
+                      <button 
+                        onClick={() => activateConfig(cfg.id)}
+                        className="btn btn-secondary btn-sm"
+                      >
+                        Activate
+                      </button>
                     )}
-                    {msg.key && <span>Key: {msg.key}</span>}
                   </div>
-                  <div className="message-payload">
-                    <pre>{msg.payload}</pre>
-                  </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
           )}
         </section>
