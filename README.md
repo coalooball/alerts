@@ -84,6 +84,58 @@ kafka-sender [OPTIONS] --data <DATA> --data-type <DATA_TYPE>
   --rate 50
 ```
 
+### kafka-consumer
+
+A standalone binary for consuming and displaying Kafka messages with automatic format detection and formatting options.
+
+#### Usage
+
+```bash
+kafka-consumer [OPTIONS]
+```
+
+#### Options
+
+- `-c, --config <CONFIG>` - Path to configuration file (default: config.toml)
+- `-g, --group-id <GROUP_ID>` - Consumer group ID (overrides config file)
+- `-t, --topic <TOPIC>` - Kafka topic to consume from (overrides config file)
+- `-o, --offset-reset <OFFSET_RESET>` - Auto offset reset: earliest, latest, none (default: earliest)
+- `-p, --pretty` - Pretty print JSON messages
+- `-d, --metadata` - Show message metadata (offset, partition, timestamp)
+- `-m, --max-messages <MAX_MESSAGES>` - Maximum messages to consume (0 = unlimited)
+- `-v, --verbose` - Enable verbose logging
+
+#### Examples
+
+```bash
+# Basic consumption with default settings
+./target/debug/kafka-consumer
+
+# Pretty print JSON messages
+./target/debug/kafka-consumer --pretty
+
+# Show message metadata with pretty printing
+./target/debug/kafka-consumer --metadata --pretty
+
+# Consume from specific topic and consumer group
+./target/debug/kafka-consumer \
+  --topic alerts \
+  --group-id my-consumer-group \
+  --pretty
+
+# Limit consumption to 100 messages with metadata
+./target/debug/kafka-consumer \
+  --max-messages 100 \
+  --metadata \
+  --pretty \
+  --verbose
+
+# Consume from latest offset (skip existing messages)
+./target/debug/kafka-consumer \
+  --offset-reset latest \
+  --pretty
+```
+
 ## Data Types Supported
 
 ### Generic Alerts (alert)

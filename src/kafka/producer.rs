@@ -21,12 +21,34 @@ pub struct KafkaProducer {
 impl KafkaProducer {
     pub async fn new(config: KafkaConfig) -> Result<Self> {
         let mut producer_config = ClientConfig::new();
+        
+        // Debug: Log the bootstrap servers being set
+        info!("Setting bootstrap.servers to: {}", config.bootstrap_servers);
+        
+        // Try to ensure we only use the specified servers
+        let bootstrap_servers = config.bootstrap_servers.clone();
+        
+        // Log the exact bootstrap servers being used
+        info!("Using bootstrap servers: '{}'", bootstrap_servers);
+        
         producer_config
-            .set("bootstrap.servers", &config.bootstrap_servers)
+            .set("bootstrap.servers", &bootstrap_servers)
             .set("message.timeout.ms", &config.producer.message_timeout_ms.to_string())
             .set("request.timeout.ms", &config.producer.request_timeout_ms.to_string())
             .set("retry.backoff.ms", &config.producer.retry_backoff_ms.to_string())
-            .set("retries", &config.producer.retries.to_string());
+            .set("retries", &config.producer.retries.to_string())
+            // Add additional configurations to ensure proper connection
+            .set("client.id", "alerts-producer")
+            .set("socket.keepalive.enable", "true")
+            .set("socket.timeout.ms", "6000")
+            .set("connections.max.idle.ms", "540000");
+
+        // Debug: Verify what was actually set
+        if let Some(servers) = producer_config.get("bootstrap.servers") {
+            info!("Verified bootstrap.servers in config: {}", servers);
+        } else {
+            error!("bootstrap.servers not found in producer config!");
+        }
 
         let producer = FutureProducer::from_config(&producer_config)?;
 

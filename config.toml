@@ -1,5 +1,5 @@
 [kafka]
-bootstrap_servers = "localhost:9092"
+bootstrap_servers = "10.26.64.224:9093"
 topic = "alerts"
 group_id = "alerts-consumer-group"
 
