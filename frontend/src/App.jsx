@@ -475,7 +475,9 @@ function App() {
   return (
     <div className="app">
       <header className="app-header">
-        <h1>🔍 挖掘告警系统</h1>
+        {/* <h1>🔍 挖掘告警系统</h1> */}
+        <h1>挖掘告警系统</h1>
+
         {/* <p>基于Kafka的安全告警处理平台</p> */}
       </header>
 
