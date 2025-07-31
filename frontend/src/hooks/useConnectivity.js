@@ -128,7 +128,7 @@ export const useConnectivity = () => {
     const config = configs.find(c => c.id === configId);
     
     if (isActive && config) {
-      // 显示测试连接的模态框
+      // 显示配置切换的模态框
       setTestModal({
         show: true,
         loading: true,
@@ -138,8 +138,8 @@ export const useConnectivity = () => {
         type: 'toggle'
       });
 
-      // 测试连接
-      const connectionSuccess = await testConnectivity(config);
+      // 静默测试连接（不显示连接测试结果）
+      const connectionSuccess = await testConnectivity(config, false);
       
       if (!connectionSuccess) {
         // 连接测试失败，显示错误信息
@@ -152,6 +152,16 @@ export const useConnectivity = () => {
         }));
         return;
       }
+    } else if (!isActive && config) {
+      // 停用配置时也显示模态框
+      setTestModal({
+        show: true,
+        loading: true,
+        result: null,
+        error: null,
+        config: config,
+        type: 'toggle'
+      });
     }
 
     try {

@@ -136,25 +136,7 @@ const KafkaConfig = ({
                   <p><strong>创建时间：</strong> {new Date(cfg.created_at).toLocaleDateString()}</p>
                 </div>
 
-                {connectivityTests[cfg.id] && (
-                  <div className="connectivity-result">
-                    {connectivityTests[cfg.id].loading && (
-                      <div className="loading">正在测试连接...</div>
-                    )}
-                    {connectivityTests[cfg.id].result && (
-                      <div className={`result ${connectivityTests[cfg.id].result.success ? 'success' : 'error'}`}>
-                        <small>
-                          {connectivityTests[cfg.id].result.success ? '✅ 连接成功' : '❌ 连接失败'}
-                        </small>
-                      </div>
-                    )}
-                    {connectivityTests[cfg.id].error && (
-                      <div className="result error">
-                        <small>❌ {connectivityTests[cfg.id].error}</small>
-                      </div>
-                    )}
-                  </div>
-                )}
+
 
                 <div className="config-actions">
                   <button 
