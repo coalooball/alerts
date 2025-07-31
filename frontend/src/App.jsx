@@ -3,18 +3,9 @@ import axios from 'axios';
 import './App.css';
 
 function App() {
-  const [config, setConfig] = useState({});
+  const [activeView, setActiveView] = useState('home');
   const [configs, setConfigs] = useState([]);
   const [activeConfigs, setActiveConfigs] = useState([]);
-  const [connectivityTest, setConnectivityTest] = useState({
-    loading: false,
-    result: null,
-    error: null
-  });
-  const [customConfig, setCustomConfig] = useState({
-    bootstrap_servers: '',
-    topic: ''
-  });
   const [newConfig, setNewConfig] = useState({
     name: '',
     bootstrap_servers: '',
@@ -32,25 +23,12 @@ function App() {
   const [showConfigForm, setShowConfigForm] = useState(false);
   const [saveResult, setSaveResult] = useState(null);
   const [tooltip, setTooltip] = useState({ show: false, content: '', x: 0, y: 0 });
+  const [connectivityTests, setConnectivityTests] = useState({});
 
   useEffect(() => {
-    loadConfig();
     loadConfigs();
     loadActiveConfigs();
   }, []);
-
-  const loadConfig = async () => {
-    try {
-      const response = await axios.get('/api/config');
-      setConfig(response.data);
-      setCustomConfig({
-        bootstrap_servers: response.data.bootstrap_servers || '',
-        topic: response.data.topic || ''
-      });
-    } catch (error) {
-      console.error('Failed to load config:', error);
-    }
-  };
 
   const loadConfigs = async () => {
     try {
@@ -74,27 +52,41 @@ function App() {
     }
   };
 
-  const testConnectivity = async (useCustom = false) => {
-    setConnectivityTest({ loading: true, result: null, error: null });
+  const testConnectivity = async (config) => {
+    const configId = config.id;
+    setConnectivityTests(prev => ({
+      ...prev,
+      [configId]: { loading: true, result: null, error: null }
+    }));
     
     try {
-      const params = useCustom ? {
-        bootstrap_servers: customConfig.bootstrap_servers,
-        topic: customConfig.topic
-      } : {};
+      const response = await axios.get('/api/test-connectivity', {
+        params: {
+          bootstrap_servers: config.bootstrap_servers,
+          topic: config.topic
+        }
+      });
       
-      const response = await axios.get('/api/test-connectivity', { params });
-      setConnectivityTest({
-        loading: false,
-        result: response.data,
-        error: null
-      });
+      setConnectivityTests(prev => ({
+        ...prev,
+        [configId]: {
+          loading: false,
+          result: response.data,
+          error: null
+        }
+      }));
+      
+      return response.data.success;
     } catch (error) {
-      setConnectivityTest({
-        loading: false,
-        result: null,
-        error: error.response?.data?.message || error.message
-      });
+      setConnectivityTests(prev => ({
+        ...prev,
+        [configId]: {
+          loading: false,
+          result: null,
+          error: error.response?.data?.message || error.message
+        }
+      }));
+      return false;
     }
   };
 
@@ -160,7 +152,7 @@ function App() {
   };
 
   const deleteConfig = async (configId) => {
-    if (!window.confirm('Are you sure you want to delete this configuration?')) {
+    if (!window.confirm('确定要删除这个配置吗？')) {
       return;
     }
 
@@ -176,12 +168,23 @@ function App() {
   };
 
   const toggleConfigActive = async (configId, isActive) => {
+    if (isActive) {
+      // 激活配置前先测试连接
+      const config = configs.find(c => c.id === configId);
+      if (config) {
+        const connectionSuccess = await testConnectivity(config);
+        if (!connectionSuccess) {
+          alert('连接测试失败，无法激活配置！');
+          return;
+        }
+      }
+    }
+
     try {
       const response = await axios.post(`/api/config/${configId}/toggle`, { is_active: isActive });
       if (response.data.success) {
         loadConfigs();
         loadActiveConfigs();
-        loadConfig(); // Reload main config if it changed
       }
     } catch (error) {
       console.error('Failed to toggle config:', error);
@@ -189,10 +192,19 @@ function App() {
   };
 
   const activateConfig = async (configId) => {
+    // 激活配置前先测试连接
+    const config = configs.find(c => c.id === configId);
+    if (config) {
+      const connectionSuccess = await testConnectivity(config);
+      if (!connectionSuccess) {
+        alert('连接测试失败，无法激活配置！');
+        return;
+      }
+    }
+
     try {
       const response = await axios.post(`/api/config/${configId}/activate`);
       if (response.data.success) {
-        loadConfig();
         loadConfigs();
         loadActiveConfigs();
       }
@@ -222,245 +234,271 @@ function App() {
     resetConfigForm();
   };
 
+  const renderHome = () => (
+    <div className="home-content">
+      <div className="welcome-section">
+        <h2>欢迎使用挖掘告警系统</h2>
+        <p>这是一个基于Kafka的安全告警处理系统，支持多种数据源的告警收集和处理。</p>
+      </div>
+      
+      <div className="status-overview">
+        <div className="status-card">
+          <h3>当前活跃配置</h3>
+          <div className="status-number">{activeConfigs.length}</div>
+          <p>个Kafka配置正在运行</p>
+        </div>
+        
+        <div className="status-card">
+          <h3>总配置数量</h3>
+          <div className="status-number">{configs.length}</div>
+          <p>个Kafka配置已创建</p>
+        </div>
+      </div>
+
+      {activeConfigs.length > 0 && (
+        <div className="active-configs-section">
+          <h3>🟢 当前活跃的Kafka配置</h3>
+          <div className="active-configs-list">
+            {activeConfigs.map((cfg) => (
+              <div key={cfg.id} className="active-config-badge">
+                <span 
+                  className="config-name"
+                  onMouseEnter={(e) => showTooltip(e, cfg)}
+                  onMouseLeave={hideTooltip}
+                >
+                  {cfg.name}
+                </span>
+                <span className="config-server">{cfg.bootstrap_servers}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  const renderKafkaConfig = () => (
+    <div className="kafka-config-content">
+      <div className="config-header">
+        <h2>Kafka配置管理</h2>
+        <div className="config-actions">
+          <button 
+            onClick={() => setShowConfigForm(!showConfigForm)}
+            className="btn btn-primary"
+          >
+            {showConfigForm ? '取消' : '新增配置'}
+          </button>
+          {showConfigForm && editingConfig && (
+            <button 
+              onClick={cancelEdit}
+              className="btn btn-secondary"
+            >
+              取消编辑
+            </button>
+          )}
+        </div>
+      </div>
+
+      {showConfigForm && (
+        <div className="config-form">
+          <h3>{editingConfig ? '编辑配置' : '创建新配置'}</h3>
+          <div className="form-grid">
+            <div className="form-row">
+              <label>配置名称：</label>
+              <input
+                type="text"
+                value={newConfig.name}
+                onChange={(e) => setNewConfig({...newConfig, name: e.target.value})}
+                className="input"
+                placeholder="输入配置名称"
+              />
+            </div>
+            
+            <div className="form-row">
+              <label>服务器地址：</label>
+              <input
+                type="text"
+                value={newConfig.bootstrap_servers}
+                onChange={(e) => setNewConfig({...newConfig, bootstrap_servers: e.target.value})}
+                className="input"
+                placeholder="例如：localhost:9092"
+              />
+            </div>
+            
+            <div className="form-row">
+              <label>主题名称：</label>
+              <input
+                type="text"
+                value={newConfig.topic}
+                onChange={(e) => setNewConfig({...newConfig, topic: e.target.value})}
+                className="input"
+                placeholder="例如：alerts"
+              />
+            </div>
+            
+            <div className="form-row">
+              <label>消费者组ID：</label>
+              <input
+                type="text"
+                value={newConfig.group_id}
+                onChange={(e) => setNewConfig({...newConfig, group_id: e.target.value})}
+                className="input"
+                placeholder="例如：alerts-consumer-group"
+              />
+            </div>
+
+            <div className="form-row">
+              <label>消息超时时间（毫秒）：</label>
+              <input
+                type="number"
+                value={newConfig.message_timeout_ms}
+                onChange={(e) => setNewConfig({...newConfig, message_timeout_ms: parseInt(e.target.value)})}
+                className="input"
+              />
+            </div>
+
+            <div className="form-row">
+              <label>请求超时时间（毫秒）：</label>
+              <input
+                type="number"
+                value={newConfig.request_timeout_ms}
+                onChange={(e) => setNewConfig({...newConfig, request_timeout_ms: parseInt(e.target.value)})}
+                className="input"
+              />
+            </div>
+          </div>
+          
+          <button onClick={saveConfig} className="btn btn-primary">
+            {editingConfig ? '更新配置' : '保存配置'}
+          </button>
+
+          {saveResult && (
+            <div className={`result ${saveResult.success ? 'success' : 'error'}`}>
+              <p>{saveResult.message}</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 配置列表 */}
+      {configs.length > 0 && (
+        <div className="configs-list">
+          <h3>已保存的配置</h3>
+          <div className="configs-grid">
+            {configs.map((cfg) => (
+              <div key={cfg.id} className={`config-card ${cfg.is_active ? 'active' : ''}`}>
+                <div className="config-header">
+                  <h4>{cfg.name}</h4>
+                  {cfg.is_active && <span className="active-badge">活跃</span>}
+                </div>
+                <div className="config-details">
+                  <p><strong>服务器：</strong> {cfg.bootstrap_servers}</p>
+                  <p><strong>主题：</strong> {cfg.topic}</p>
+                  <p><strong>消费者组：</strong> {cfg.group_id}</p>
+                  <p><strong>创建时间：</strong> {new Date(cfg.created_at).toLocaleDateString()}</p>
+                </div>
+
+                {/* 连接测试结果 */}
+                {connectivityTests[cfg.id] && (
+                  <div className="connectivity-result">
+                    {connectivityTests[cfg.id].loading && (
+                      <div className="loading">正在测试连接...</div>
+                    )}
+                    {connectivityTests[cfg.id].result && (
+                      <div className={`result ${connectivityTests[cfg.id].result.success ? 'success' : 'error'}`}>
+                        <small>
+                          {connectivityTests[cfg.id].result.success ? '✅ 连接成功' : '❌ 连接失败'}
+                        </small>
+                      </div>
+                    )}
+                    {connectivityTests[cfg.id].error && (
+                      <div className="result error">
+                        <small>❌ {connectivityTests[cfg.id].error}</small>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <div className="config-actions">
+                  <button 
+                    onClick={() => testConnectivity(cfg)}
+                    className="btn btn-info btn-sm"
+                    disabled={connectivityTests[cfg.id]?.loading}
+                  >
+                    测试连接
+                  </button>
+                  
+                  <button 
+                    onClick={() => toggleConfigActive(cfg.id, !cfg.is_active)}
+                    className={`btn btn-sm ${cfg.is_active ? 'btn-warning' : 'btn-success'}`}
+                  >
+                    {cfg.is_active ? '停用' : '启用'}
+                  </button>
+                  
+                  <button 
+                    onClick={() => startEditConfig(cfg)}
+                    className="btn btn-secondary btn-sm"
+                  >
+                    编辑
+                  </button>
+                  
+                  <button 
+                    onClick={() => deleteConfig(cfg.id)}
+                    className="btn btn-danger btn-sm"
+                  >
+                    删除
+                  </button>
+                  
+                  {!cfg.is_active && (
+                    <button 
+                      onClick={() => activateConfig(cfg.id)}
+                      className="btn btn-primary btn-sm"
+                      title="设为唯一活跃配置（停用其他配置）"
+                    >
+                      设为唯一活跃
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
   return (
     <div className="app">
       <header className="app-header">
-        <h1>🚨 Kafka Configuration Dashboard</h1>
-        <p>Manage Kafka configurations and test connectivity</p>
+        <h1>🔍 挖掘告警系统</h1>
+        <p>基于Kafka的安全告警处理平台</p>
       </header>
 
-      <main className="main-content">
-        {/* Active Configurations Section */}
-        <section className="card">
-          <h2>📡 Active Kafka Configurations ({activeConfigs.length})</h2>
-          {activeConfigs.length === 0 ? (
-            <div className="no-configs">
-              <p>No active configurations. Please activate at least one configuration to use Kafka.</p>
-            </div>
-          ) : (
-            <div className="active-configs-list">
-              {activeConfigs.map((cfg) => (
-                <div key={cfg.id} className="active-config-badge">
-                  <span 
-                    className="config-name"
-                    onMouseEnter={(e) => showTooltip(e, cfg)}
-                    onMouseLeave={hideTooltip}
-                  >
-                    {cfg.name}
-                  </span>
-                  <button 
-                    onClick={() => toggleConfigActive(cfg.id, false)}
-                    className="deactivate-btn"
-                    title="Deactivate this configuration"
-                  >
-                    ×
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
-
-        {/* Connectivity Test Section */}
-        <section className="card">
-          <h2>🔌 Connectivity Test</h2>
-          
-          <div className="connectivity-controls">
-            <button 
-              onClick={() => testConnectivity(false)}
-              disabled={connectivityTest.loading}
-              className="btn btn-primary"
-            >
-              {connectivityTest.loading ? 'Testing...' : 'Test Active Config'}
-            </button>
-            
-            <div className="custom-config">
-              <h3>Test Custom Configuration</h3>
-              <input
-                type="text"
-                placeholder="Bootstrap Servers (e.g., localhost:9092)"
-                value={customConfig.bootstrap_servers}
-                onChange={(e) => setCustomConfig({
-                  ...customConfig,
-                  bootstrap_servers: e.target.value
-                })}
-                className="input"
-              />
-              <input
-                type="text"
-                placeholder="Topic"
-                value={customConfig.topic}
-                onChange={(e) => setCustomConfig({
-                  ...customConfig,
-                  topic: e.target.value
-                })}
-                className="input"
-              />
-              <button 
-                onClick={() => testConnectivity(true)}
-                disabled={connectivityTest.loading}
-                className="btn btn-secondary"
-              >
-                Test Custom Config
+      <div className="app-container">
+        {/* 侧边栏 */}
+        <nav className="sidebar">
+          <ul className="nav-menu">
+            <li className={activeView === 'home' ? 'active' : ''}>
+              <button onClick={() => setActiveView('home')}>
+                🏠 首页
               </button>
-            </div>
-          </div>
-
-          {connectivityTest.result && (
-            <div className={`result ${connectivityTest.result.success ? 'success' : 'error'}`}>
-              <h3>{connectivityTest.result.success ? '✅ Success' : '❌ Failed'}</h3>
-              <p>{connectivityTest.result.message}</p>
-              {connectivityTest.result.details && (
-                <pre>{JSON.stringify(connectivityTest.result.details, null, 2)}</pre>
-              )}
-            </div>
-          )}
-
-          {connectivityTest.error && (
-            <div className="result error">
-              <h3>❌ Error</h3>
-              <p>{connectivityTest.error}</p>
-            </div>
-          )}
-        </section>
-
-        {/* Configurations Management */}
-        <section className="card">
-          <h2>⚙️ Configuration Management</h2>
-          
-          <div className="config-actions">
-            <button 
-              onClick={() => setShowConfigForm(!showConfigForm)}
-              className="btn btn-primary"
-            >
-              {showConfigForm ? 'Cancel' : 'Add New Configuration'}
-            </button>
-            {showConfigForm && editingConfig && (
-              <button 
-                onClick={cancelEdit}
-                className="btn btn-secondary"
-              >
-                Cancel Edit
+            </li>
+            <li className={activeView === 'kafka' ? 'active' : ''}>
+              <button onClick={() => setActiveView('kafka')}>
+                ⚙️ Kafka配置
               </button>
-            )}
-          </div>
+            </li>
+          </ul>
+        </nav>
 
-          {showConfigForm && (
-            <div className="config-form">
-              <h3>{editingConfig ? 'Edit Configuration' : 'Create New Configuration'}</h3>
-              <div className="form-grid">
-                <div className="form-row">
-                  <label>Name:</label>
-                  <input
-                    type="text"
-                    value={newConfig.name}
-                    onChange={(e) => setNewConfig({...newConfig, name: e.target.value})}
-                    className="input"
-                    placeholder="Configuration name"
-                  />
-                </div>
-                
-                <div className="form-row">
-                  <label>Bootstrap Servers:</label>
-                  <input
-                    type="text"
-                    value={newConfig.bootstrap_servers}
-                    onChange={(e) => setNewConfig({...newConfig, bootstrap_servers: e.target.value})}
-                    className="input"
-                    placeholder="localhost:9092"
-                  />
-                </div>
-                
-                <div className="form-row">
-                  <label>Topic:</label>
-                  <input
-                    type="text"
-                    value={newConfig.topic}
-                    onChange={(e) => setNewConfig({...newConfig, topic: e.target.value})}
-                    className="input"
-                    placeholder="alerts"
-                  />
-                </div>
-                
-                <div className="form-row">
-                  <label>Group ID:</label>
-                  <input
-                    type="text"
-                    value={newConfig.group_id}
-                    onChange={(e) => setNewConfig({...newConfig, group_id: e.target.value})}
-                    className="input"
-                    placeholder="alerts-consumer-group"
-                  />
-                </div>
-              </div>
-              
-              <button onClick={saveConfig} className="btn btn-primary">
-                {editingConfig ? 'Update Configuration' : 'Save Configuration'}
-              </button>
+        {/* 主内容区域 */}
+        <main className="main-content">
+          {activeView === 'home' && renderHome()}
+          {activeView === 'kafka' && renderKafkaConfig()}
+        </main>
+      </div>
 
-              {saveResult && (
-                <div className={`result ${saveResult.success ? 'success' : 'error'}`}>
-                  <p>{saveResult.message}</p>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Existing Configurations List */}
-          {configs.length > 0 && (
-            <div className="configs-list">
-              <h3>📋 Saved Configurations</h3>
-              <div className="configs-grid">
-                {configs.map((cfg) => (
-                  <div key={cfg.id} className={`config-card ${cfg.is_active ? 'active' : ''}`}>
-                    <div className="config-header">
-                      <h4>{cfg.name}</h4>
-                      {cfg.is_active && <span className="active-badge">Active</span>}
-                    </div>
-                    <div className="config-details">
-                      <p><strong>Server:</strong> {cfg.bootstrap_servers}</p>
-                      <p><strong>Topic:</strong> {cfg.topic}</p>
-                      <p><strong>Group:</strong> {cfg.group_id}</p>
-                      <p><strong>Created:</strong> {new Date(cfg.created_at).toLocaleDateString()}</p>
-                    </div>
-                    <div className="config-actions">
-                      <button 
-                        onClick={() => toggleConfigActive(cfg.id, !cfg.is_active)}
-                        className={`btn btn-sm ${cfg.is_active ? 'btn-warning' : 'btn-success'}`}
-                      >
-                        {cfg.is_active ? 'Deactivate' : 'Activate'}
-                      </button>
-                      <button 
-                        onClick={() => startEditConfig(cfg)}
-                        className="btn btn-secondary btn-sm"
-                      >
-                        Edit
-                      </button>
-                      <button 
-                        onClick={() => deleteConfig(cfg.id)}
-                        className="btn btn-danger btn-sm"
-                      >
-                        Delete
-                      </button>
-                      {!cfg.is_active && (
-                        <button 
-                          onClick={() => activateConfig(cfg.id)}
-                          className="btn btn-primary btn-sm"
-                          title="Activate only this configuration (deactivate others)"
-                        >
-                          Set as Only Active
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </section>
-      </main>
-
-      {/* Tooltip */}
+      {/* 工具提示 */}
       {tooltip.show && (
         <div 
           className="tooltip"
@@ -472,13 +510,13 @@ function App() {
         >
           <div className="tooltip-content">
             <h4>{tooltip.content.name}</h4>
-            <p><strong>Server:</strong> {tooltip.content.bootstrap_servers}</p>
-            <p><strong>Topic:</strong> {tooltip.content.topic}</p>
-            <p><strong>Group:</strong> {tooltip.content.group_id}</p>
-            <p><strong>Timeout:</strong> {tooltip.content.message_timeout_ms}ms</p>
-            <p><strong>Retries:</strong> {tooltip.content.retries}</p>
-            <p><strong>Offset Reset:</strong> {tooltip.content.auto_offset_reset}</p>
-            <p><strong>Auto Commit:</strong> {tooltip.content.enable_auto_commit ? 'Yes' : 'No'}</p>
+            <p><strong>服务器：</strong> {tooltip.content.bootstrap_servers}</p>
+            <p><strong>主题：</strong> {tooltip.content.topic}</p>
+            <p><strong>消费者组：</strong> {tooltip.content.group_id}</p>
+            <p><strong>超时时间：</strong> {tooltip.content.message_timeout_ms}ms</p>
+            <p><strong>重试次数：</strong> {tooltip.content.retries}</p>
+            <p><strong>偏移重置：</strong> {tooltip.content.auto_offset_reset}</p>
+            <p><strong>自动提交：</strong> {tooltip.content.enable_auto_commit ? '是' : '否'}</p>
           </div>
         </div>
       )}

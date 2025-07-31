@@ -7,6 +7,8 @@
 .app {
   min-height: 100vh;
   background-color: #f5f5f5;
+  display: flex;
+  flex-direction: column;
 }
 
 .app-header {
@@ -22,12 +24,144 @@
   font-size: 2.5rem;
 }
 
+/* 应用容器 */
+.app-container {
+  display: flex;
+  flex: 1;
+  min-height: calc(100vh - 120px);
+}
+
+/* 侧边栏样式 */
+.sidebar {
+  width: 250px;
+  background: #2d3748;
+  color: white;
+  padding: 1.5rem 0;
+  box-shadow: 2px 0 4px rgba(0,0,0,0.1);
+}
+
+.nav-menu {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.nav-menu li {
+  margin: 0;
+}
+
+.nav-menu li button {
+  width: 100%;
+  background: none;
+  border: none;
+  color: white;
+  padding: 1rem 1.5rem;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  font-size: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.nav-menu li:hover button {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.nav-menu li.active button {
+  background-color: #4299e1;
+  font-weight: 600;
+}
+
+/* 主内容区域 */
 .main-content {
+  flex: 1;
+  padding: 2rem;
+  background-color: #f5f5f5;
+  overflow-y: auto;
+}
+
+/* 首页内容 */
+.home-content {
+  max-width: 1000px;
+  margin: 0 auto;
+}
+
+.welcome-section {
+  background: white;
+  border-radius: 12px;
+  padding: 2rem;
+  margin-bottom: 2rem;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  text-align: center;
+}
+
+.welcome-section h2 {
+  color: #2d3748;
+  margin-bottom: 1rem;
+  font-size: 2rem;
+}
+
+.welcome-section p {
+  color: #4a5568;
+  font-size: 1.1rem;
+  margin: 0;
+}
+
+.status-overview {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 1.5rem;
+  margin-bottom: 2rem;
+}
+
+.status-card {
+  background: white;
+  border-radius: 12px;
+  padding: 1.5rem;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  text-align: center;
+  border-left: 4px solid #4299e1;
+}
+
+.status-card h3 {
+  color: #4a5568;
+  margin-bottom: 1rem;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.status-number {
+  font-size: 2.5rem;
+  font-weight: bold;
+  color: #4299e1;
+  margin-bottom: 0.5rem;
+}
+
+.status-card p {
+  color: #718096;
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.active-configs-section {
+  background: white;
+  border-radius: 12px;
+  padding: 2rem;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.active-configs-section h3 {
+  color: #2d3748;
+  margin-bottom: 1rem;
+  font-size: 1.3rem;
+}
+
+/* Kafka配置内容 */
+.kafka-config-content {
   max-width: 1200px;
   margin: 0 auto;
-  padding: 2rem;
-  display: grid;
-  gap: 2rem;
 }
 
 .card {
@@ -176,11 +310,19 @@
 }
 
 .config-form {
-  margin-top: 1rem;
-  padding: 1.5rem;
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-  background: #f7fafc;
+  background: white;
+  border-radius: 12px;
+  padding: 2rem;
+  margin-bottom: 2rem;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.config-form h3 {
+  color: #2d3748;
+  margin-bottom: 1.5rem;
+  font-size: 1.3rem;
+  border-bottom: 2px solid #e2e8f0;
+  padding-bottom: 0.5rem;
 }
 
 .form-grid {
@@ -190,7 +332,18 @@
 }
 
 .configs-list {
-  margin-top: 1.5rem;
+  background: white;
+  border-radius: 12px;
+  padding: 2rem;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.configs-list h3 {
+  color: #2d3748;
+  margin-bottom: 1.5rem;
+  font-size: 1.3rem;
+  border-bottom: 2px solid #e2e8f0;
+  padding-bottom: 0.5rem;
 }
 
 .configs-grid {
@@ -215,12 +368,27 @@
 .config-card.active {
   border-color: #4299e1;
   background: #f0f8ff;
+  box-shadow: 0 4px 12px rgba(66, 153, 225, 0.2);
 }
 
 .config-header {
+  background: white;
+  border-radius: 12px;
+  padding: 1.5rem;
+  margin-bottom: 2rem;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+.config-header h2 {
+  margin: 0;
+  color: #2d3748;
+  font-size: 1.8rem;
+}
+
+.kafka-config-content .config-header {
   margin-bottom: 0.5rem;
 }
 
@@ -283,6 +451,61 @@
   transform: translateY(-1px);
 }
 
+.btn-info {
+  background: #3182ce;
+  color: white;
+}
+
+.btn-info:hover:not(:disabled) {
+  background: #2c5282;
+  transform: translateY(-1px);
+}
+
+/* 连接测试结果样式 */
+.connectivity-result {
+  margin: 1rem 0;
+  padding: 0.75rem;
+  border-radius: 6px;
+  background: #f7fafc;
+  border: 1px solid #e2e8f0;
+}
+
+.connectivity-result .loading {
+  color: #4299e1;
+  font-style: italic;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.connectivity-result .loading::before {
+  content: '⟳';
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.connectivity-result .result.success {
+  background: #f0fff4;
+  border-color: #38a169;
+  padding: 0.5rem;
+  border-radius: 4px;
+}
+
+.connectivity-result .result.error {
+  background: #fed7d7;
+  border-color: #e53e3e;
+  padding: 0.5rem;
+  border-radius: 4px;
+}
+
 .active-configs-list {
   display: flex;
   flex-wrap: wrap;
@@ -293,12 +516,27 @@
 .active-config-badge {
   display: flex;
   align-items: center;
-  background: #38a169;
+  background: linear-gradient(135deg, #38a169 0%, #2f855a 100%);
   color: white;
-  padding: 0.5rem 0.75rem;
-  border-radius: 20px;
+  padding: 0.75rem 1rem;
+  border-radius: 25px;
   font-size: 0.9rem;
   font-weight: 500;
+  box-shadow: 0 2px 6px rgba(56, 161, 105, 0.3);
+  transition: transform 0.2s ease;
+}
+
+.active-config-badge:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(56, 161, 105, 0.4);
+}
+
+.config-server {
+  opacity: 0.8;
+  font-size: 0.8rem;
+  margin-left: 0.5rem;
+  padding-left: 0.5rem;
+  border-left: 1px solid rgba(255, 255, 255, 0.3);
 }
 
 .config-name {
@@ -449,13 +687,42 @@
 
 /* Responsive design */
 @media (max-width: 768px) {
-  .main-content {
-    padding: 1rem;
-    gap: 1rem;
+  .app-container {
+    flex-direction: column;
   }
   
-  .card {
-    padding: 1.5rem;
+  .sidebar {
+    width: 100%;
+    padding: 1rem 0;
+  }
+  
+  .nav-menu {
+    display: flex;
+    justify-content: center;
+  }
+  
+  .nav-menu li {
+    flex: 1;
+  }
+  
+  .nav-menu li button {
+    padding: 0.75rem;
+    font-size: 0.9rem;
+    justify-content: center;
+  }
+  
+  .main-content {
+    padding: 1rem;
+  }
+  
+  .kafka-config-content .config-header {
+    flex-direction: column;
+    gap: 1rem;
+    align-items: stretch;
+  }
+  
+  .config-actions {
+    justify-content: center;
   }
   
   .app-header {
@@ -466,8 +733,16 @@
     font-size: 2rem;
   }
   
-  .message-meta {
-    flex-direction: column;
-    gap: 0.5rem;
+  .status-overview {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+  
+  .welcome-section h2 {
+    font-size: 1.5rem;
+  }
+  
+  .configs-grid {
+    grid-template-columns: 1fr;
   }
 }
