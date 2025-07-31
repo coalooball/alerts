@@ -24,6 +24,7 @@ function App() {
   const [saveResult, setSaveResult] = useState(null);
   const [tooltip, setTooltip] = useState({ show: false, content: '', x: 0, y: 0 });
   const [connectivityTests, setConnectivityTests] = useState({});
+  const [testModal, setTestModal] = useState({ show: false, loading: false, result: null, error: null, config: null });
 
   useEffect(() => {
     loadConfigs();
@@ -52,12 +53,23 @@ function App() {
     }
   };
 
-  const testConnectivity = async (config) => {
+  const testConnectivity = async (config, showModal = false) => {
     const configId = config.id;
-    setConnectivityTests(prev => ({
-      ...prev,
-      [configId]: { loading: true, result: null, error: null }
-    }));
+    
+    if (showModal) {
+      setTestModal({
+        show: true,
+        loading: true,
+        result: null,
+        error: null,
+        config: config
+      });
+    } else {
+      setConnectivityTests(prev => ({
+        ...prev,
+        [configId]: { loading: true, result: null, error: null }
+      }));
+    }
     
     try {
       const response = await axios.get('/api/test-connectivity', {
@@ -67,25 +79,46 @@ function App() {
         }
       });
       
-      setConnectivityTests(prev => ({
-        ...prev,
-        [configId]: {
+      if (showModal) {
+        setTestModal(prev => ({
+          ...prev,
           loading: false,
           result: response.data,
           error: null
-        }
-      }));
+        }));
+      } else {
+        setConnectivityTests(prev => ({
+          ...prev,
+          [configId]: {
+            loading: false,
+            result: response.data,
+            error: null
+          }
+        }));
+      }
       
       return response.data.success;
     } catch (error) {
-      setConnectivityTests(prev => ({
-        ...prev,
-        [configId]: {
+      const errorMessage = error.response?.data?.message || error.message;
+      
+      if (showModal) {
+        setTestModal(prev => ({
+          ...prev,
           loading: false,
           result: null,
-          error: error.response?.data?.message || error.message
-        }
-      }));
+          error: errorMessage
+        }));
+      } else {
+        setConnectivityTests(prev => ({
+          ...prev,
+          [configId]: {
+            loading: false,
+            result: null,
+            error: errorMessage
+          }
+        }));
+      }
+      
       return false;
     }
   };
@@ -191,26 +224,8 @@ function App() {
     }
   };
 
-  const activateConfig = async (configId) => {
-    // 激活配置前先测试连接
-    const config = configs.find(c => c.id === configId);
-    if (config) {
-      const connectionSuccess = await testConnectivity(config);
-      if (!connectionSuccess) {
-        alert('连接测试失败，无法激活配置！');
-        return;
-      }
-    }
-
-    try {
-      const response = await axios.post(`/api/config/${configId}/activate`);
-      if (response.data.success) {
-        loadConfigs();
-        loadActiveConfigs();
-      }
-    } catch (error) {
-      console.error('Failed to activate config:', error);
-    }
+  const closeTestModal = () => {
+    setTestModal({ show: false, loading: false, result: null, error: null, config: null });
   };
 
   const showTooltip = (event, config) => {
@@ -421,7 +436,7 @@ function App() {
 
                 <div className="config-actions">
                   <button 
-                    onClick={() => testConnectivity(cfg)}
+                    onClick={() => testConnectivity(cfg, true)}
                     className="btn btn-info btn-sm"
                     disabled={connectivityTests[cfg.id]?.loading}
                   >
@@ -448,16 +463,6 @@ function App() {
                   >
                     删除
                   </button>
-                  
-                  {!cfg.is_active && (
-                    <button 
-                      onClick={() => activateConfig(cfg.id)}
-                      className="btn btn-primary btn-sm"
-                      title="设为唯一活跃配置（停用其他配置）"
-                    >
-                      设为唯一活跃
-                    </button>
-                  )}
                 </div>
               </div>
             ))}
@@ -471,7 +476,7 @@ function App() {
     <div className="app">
       <header className="app-header">
         <h1>🔍 挖掘告警系统</h1>
-        <p>基于Kafka的安全告警处理平台</p>
+        {/* <p>基于Kafka的安全告警处理平台</p> */}
       </header>
 
       <div className="app-container">
@@ -517,6 +522,88 @@ function App() {
             <p><strong>重试次数：</strong> {tooltip.content.retries}</p>
             <p><strong>偏移重置：</strong> {tooltip.content.auto_offset_reset}</p>
             <p><strong>自动提交：</strong> {tooltip.content.enable_auto_commit ? '是' : '否'}</p>
+          </div>
+        </div>
+      )}
+
+      {/* 连接测试弹框 */}
+      {testModal.show && (
+        <div className="modal-overlay" onClick={closeTestModal}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>🔗 连接测试结果</h3>
+              <button className="modal-close" onClick={closeTestModal}>
+                ×
+              </button>
+            </div>
+            
+            {testModal.config && (
+              <div className="modal-body">
+                <div className="test-config-info">
+                  <h4>📋 测试配置信息</h4>
+                  <div className="config-info-grid">
+                    <div><strong>配置名称：</strong>{testModal.config.name}</div>
+                    <div><strong>服务器地址：</strong>{testModal.config.bootstrap_servers}</div>
+                    <div><strong>主题名称：</strong>{testModal.config.topic}</div>
+                    <div><strong>消费者组：</strong>{testModal.config.group_id}</div>
+                  </div>
+                </div>
+                
+                <div className="test-result-section">
+                  <h4>📊 测试结果</h4>
+                  
+                  {testModal.loading && (
+                    <div className="test-loading">
+                      <div className="loading-spinner"></div>
+                      <span>正在连接Kafka服务器，请稍候...</span>
+                    </div>
+                  )}
+                  
+                  {testModal.result && (
+                    <div className={`test-result ${testModal.result.success ? 'success' : 'error'}`}>
+                      <div className="result-status">
+                        {testModal.result.success ? (
+                          <><span className="status-icon">✅</span> 连接成功！</>
+                        ) : (
+                          <><span className="status-icon">❌</span> 连接失败！</>
+                        )}
+                      </div>
+                      
+                      <div className="result-message">
+                        <strong>详细信息：</strong>
+                        <p>{testModal.result.message}</p>
+                      </div>
+                      
+                      {testModal.result.details && (
+                        <div className="result-details">
+                          <strong>连接详情：</strong>
+                          <pre>{JSON.stringify(testModal.result.details, null, 2)}</pre>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  
+                  {testModal.error && (
+                    <div className="test-result error">
+                      <div className="result-status">
+                        <span className="status-icon">❌</span> 连接失败！
+                      </div>
+                      
+                      <div className="result-message">
+                        <strong>错误信息：</strong>
+                        <p>{testModal.error}</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+            
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={closeTestModal}>
+                关闭
+              </button>
+            </div>
           </div>
         </div>
       )}
