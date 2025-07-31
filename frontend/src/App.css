@@ -975,3 +975,54 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* 配置页面tab样式 */
+.config-tabs {
+  display: flex;
+  border-bottom: 2px solid #e2e8f0;
+  margin-bottom: 2rem;
+}
+
+.tab-button {
+  background: none;
+  border: none;
+  padding: 0.75rem 1.5rem;
+  font-size: 1rem;
+  cursor: pointer;
+  color: #64748b;
+  border-bottom: 2px solid transparent;
+  transition: all 0.2s;
+}
+
+.tab-button:hover {
+  color: #3b82f6;
+  background-color: #f8fafc;
+}
+
+.tab-button.active {
+  color: #3b82f6;
+  border-bottom-color: #3b82f6;
+  font-weight: 600;
+}
+
+/* ClickHouse配置样式 */
+.clickhouse-config-content .config-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2rem;
+}
+
+.clickhouse-config-content .config-actions {
+  display: flex;
+  gap: 1rem;
+}
+
+.current-config {
+  margin-top: 2rem;
+}
+
+.current-config h4 {
+  margin-bottom: 1rem;
+  color: #2d3748;
+}

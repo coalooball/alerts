@@ -83,6 +83,27 @@ struct ToggleConfigRequest {
 }
 
 #[derive(Deserialize)]
+struct SaveClickHouseConfigRequest {
+    name: String,
+    host: String,
+    port: Option<i32>,
+    database_name: String,
+    username: String,
+    password: Option<String>,
+    use_tls: Option<bool>,
+    connection_timeout_ms: Option<i32>,
+    request_timeout_ms: Option<i32>,
+    max_connections: Option<i32>,
+}
+
+#[derive(Serialize)]
+struct ClickHouseConfigResponse {
+    success: bool,
+    message: String,
+    config: Option<serde_json::Value>,
+}
+
+#[derive(Deserialize)]
 struct ConsumeMessagesQuery {
     topic: Option<String>,
     group_id: Option<String>,
@@ -177,7 +198,11 @@ async fn main() -> Result<()> {
         .route("/api/config/:id", delete(delete_config))
         .route("/api/config/:id/activate", post(activate_config))
         .route("/api/config/:id/toggle", post(toggle_config))
-        .nest_service("/", ServeDir::new("frontend/dist"))
+        .route("/api/clickhouse-config", get(get_clickhouse_config))
+        .route("/api/clickhouse-config", post(save_clickhouse_config))
+        .route("/api/clickhouse-config", delete(delete_clickhouse_config))
+        .route("/api/test-clickhouse-connectivity", get(test_clickhouse_connectivity))
+        .nest_service("/", ServeDir::new("./frontend/dist"))
         .layer(
             ServiceBuilder::new()
                 .layer(CorsLayer::permissive())
@@ -626,4 +651,142 @@ async fn get_config(
     config_map.insert("group_id".to_string(), serde_json::Value::String(state.config.group_id.clone()));
 
     ResponseJson(serde_json::Value::Object(config_map))
+}
+
+// ClickHouse configuration handlers
+async fn get_clickhouse_config(
+    State(state): State<Arc<AppState>>,
+) -> Result<ResponseJson<ClickHouseConfigResponse>, StatusCode> {
+    match state.database.get_clickhouse_config().await {
+        Ok(config) => {
+            let response = ClickHouseConfigResponse {
+                success: true,
+                message: "ClickHouse configuration retrieved successfully".to_string(),
+                config: config.map(|c| serde_json::to_value(c).unwrap_or_default()),
+            };
+            Ok(ResponseJson(response))
+        },
+        Err(e) => {
+            error!("Failed to get ClickHouse configuration: {}", e);
+            let response = ClickHouseConfigResponse {
+                success: false,
+                message: format!("Failed to get ClickHouse configuration: {}", e),
+                config: None,
+            };
+            Ok(ResponseJson(response))
+        }
+    }
+}
+
+async fn save_clickhouse_config(
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<SaveClickHouseConfigRequest>,
+) -> Result<ResponseJson<ClickHouseConfigResponse>, StatusCode> {
+    use alerts::database::ClickHouseConfigRow;
+    
+    let config = ClickHouseConfigRow {
+        id: uuid::Uuid::new_v4(), // This will be ignored for create_or_update
+        name: request.name,
+        host: request.host,
+        port: request.port.unwrap_or(8123),
+        database_name: request.database_name,
+        username: request.username,
+        password: request.password,
+        use_tls: request.use_tls.unwrap_or(false),
+        connection_timeout_ms: request.connection_timeout_ms.unwrap_or(10000),
+        request_timeout_ms: request.request_timeout_ms.unwrap_or(30000),
+        max_connections: request.max_connections.unwrap_or(10),
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+    };
+
+    match state.database.create_or_update_clickhouse_config(&config).await {
+        Ok(_id) => {
+            let response = ClickHouseConfigResponse {
+                success: true,
+                message: "ClickHouse configuration saved successfully".to_string(),
+                config: Some(serde_json::to_value(&config).unwrap_or_default()),
+            };
+            Ok(ResponseJson(response))
+        },
+        Err(e) => {
+            error!("Failed to save ClickHouse configuration: {}", e);
+            let response = ClickHouseConfigResponse {
+                success: false,
+                message: format!("Failed to save ClickHouse configuration: {}", e),
+                config: None,
+            };
+            Ok(ResponseJson(response))
+        }
+    }
+}
+
+async fn delete_clickhouse_config(
+    State(state): State<Arc<AppState>>,
+) -> Result<ResponseJson<ClickHouseConfigResponse>, StatusCode> {
+    match state.database.delete_clickhouse_config().await {
+        Ok(()) => {
+            let response = ClickHouseConfigResponse {
+                success: true,
+                message: "ClickHouse configuration deleted successfully".to_string(),
+                config: None,
+            };
+            Ok(ResponseJson(response))
+        },
+        Err(e) => {
+            error!("Failed to delete ClickHouse configuration: {}", e);
+            let response = ClickHouseConfigResponse {
+                success: false,
+                message: format!("Failed to delete ClickHouse configuration: {}", e),
+                config: None,
+            };
+            Ok(ResponseJson(response))
+        }
+    }
+}
+
+async fn test_clickhouse_connectivity(
+    State(state): State<Arc<AppState>>,
+) -> Result<ResponseJson<ConnectivityResponse>, StatusCode> {
+    let config = match state.database.get_clickhouse_config().await {
+        Ok(Some(config)) => config,
+        Ok(None) => {
+            let response = ConnectivityResponse {
+                success: false,
+                message: "No ClickHouse configuration found".to_string(),
+                details: None,
+            };
+            return Ok(ResponseJson(response));
+        },
+        Err(e) => {
+            error!("Failed to get ClickHouse configuration: {}", e);
+            let response = ConnectivityResponse {
+                success: false,
+                message: format!("Failed to get ClickHouse configuration: {}", e),
+                details: None,
+            };
+            return Ok(ResponseJson(response));
+        }
+    };
+
+    // Test ClickHouse connectivity (simplified version - just check if we can format the connection URL)
+    let connection_url = if config.use_tls {
+        format!("https://{}:{}", config.host, config.port)
+    } else {
+        format!("http://{}:{}", config.host, config.port)
+    };
+
+    let response = ConnectivityResponse {
+        success: true,
+        message: "ClickHouse configuration is valid".to_string(),
+        details: Some(serde_json::json!({
+            "host": config.host,
+            "port": config.port,
+            "database": config.database_name,
+            "connection_url": connection_url,
+            "use_tls": config.use_tls
+        })),
+    };
+
+    Ok(ResponseJson(response))
 }

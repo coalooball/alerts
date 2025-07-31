@@ -4,8 +4,10 @@ import './App.css';
 
 function App() {
   const [activeView, setActiveView] = useState('home');
+  const [configTab, setConfigTab] = useState('kafka'); // kafka or clickhouse
   const [configs, setConfigs] = useState([]);
   const [activeConfigs, setActiveConfigs] = useState([]);
+  const [clickhouseConfig, setClickhouseConfig] = useState(null);
   const [newConfig, setNewConfig] = useState({
     name: '',
     bootstrap_servers: '',
@@ -19,6 +21,18 @@ function App() {
     enable_auto_commit: true,
     auto_commit_interval_ms: 1000
   });
+  const [newClickhouseConfig, setNewClickhouseConfig] = useState({
+    name: 'default',
+    host: '10.26.64.224',
+    port: 8123,
+    database_name: 'default',
+    username: 'default',
+    password: 'default',
+    use_tls: false,
+    connection_timeout_ms: 10000,
+    request_timeout_ms: 30000,
+    max_connections: 10
+  });
   const [editingConfig, setEditingConfig] = useState(null);
   const [showConfigForm, setShowConfigForm] = useState(false);
   const [saveResult, setSaveResult] = useState(null);
@@ -29,6 +43,7 @@ function App() {
   useEffect(() => {
     loadConfigs();
     loadActiveConfigs();
+    loadClickhouseConfig();
   }, []);
 
   const loadConfigs = async () => {
@@ -50,6 +65,18 @@ function App() {
       }
     } catch (error) {
       console.error('Failed to load active configs:', error);
+    }
+  };
+
+  const loadClickhouseConfig = async () => {
+    try {
+      const response = await axios.get('/api/clickhouse-config');
+      if (response.data.success && response.data.config) {
+        setClickhouseConfig(response.data.config);
+        setNewClickhouseConfig(response.data.config);
+      }
+    } catch (error) {
+      console.error('Failed to load ClickHouse config:', error);
     }
   };
 
@@ -123,24 +150,72 @@ function App() {
     }
   };
 
+  const testClickhouseConnectivity = async (showModal = false) => {
+    if (showModal) {
+      setTestModal({
+        show: true,
+        loading: true,
+        result: null,
+        error: null,
+        config: clickhouseConfig
+      });
+    }
+    
+    try {
+      const response = await axios.get('/api/test-clickhouse-connectivity');
+      
+      if (showModal) {
+        setTestModal(prev => ({
+          ...prev,
+          loading: false,
+          result: response.data,
+          error: null
+        }));
+      }
+      
+      return response.data.success;
+    } catch (error) {
+      const errorMessage = error.response?.data?.message || error.message;
+      
+      if (showModal) {
+        setTestModal(prev => ({
+          ...prev,
+          loading: false,
+          result: null,
+          error: errorMessage
+        }));
+      }
+      
+      return false;
+    }
+  };
+
   const saveConfig = async () => {
     setSaveResult(null);
     
     try {
       let response;
-      if (editingConfig) {
-        response = await axios.put(`/api/config/${editingConfig.id}`, newConfig);
+      if (configTab === 'clickhouse') {
+        response = await axios.post('/api/clickhouse-config', newClickhouseConfig);
       } else {
-        response = await axios.post('/api/config', newConfig);
+        if (editingConfig) {
+          response = await axios.put(`/api/config/${editingConfig.id}`, newConfig);
+        } else {
+          response = await axios.post('/api/config', newConfig);
+        }
       }
       
       setSaveResult(response.data);
       if (response.data.success) {
         setShowConfigForm(false);
         setEditingConfig(null);
-        loadConfigs();
-        loadActiveConfigs();
-        resetConfigForm();
+        if (configTab === 'clickhouse') {
+          loadClickhouseConfig();
+        } else {
+          loadConfigs();
+          loadActiveConfigs();
+          resetConfigForm();
+        }
       }
     } catch (error) {
       setSaveResult({
@@ -289,6 +364,31 @@ function App() {
           </div>
         </div>
       )}
+    </div>
+  );
+
+  const renderConfigPage = () => (
+    <div className="config-content">
+      <div className="config-header">
+        <h2>配置管理</h2>
+        <div className="config-tabs">
+          <button 
+            className={`tab-button ${configTab === 'kafka' ? 'active' : ''}`}
+            onClick={() => setConfigTab('kafka')}
+          >
+            Kafka配置
+          </button>
+          <button 
+            className={`tab-button ${configTab === 'clickhouse' ? 'active' : ''}`}
+            onClick={() => setConfigTab('clickhouse')}
+          >
+            ClickHouse配置
+          </button>
+        </div>
+      </div>
+
+      {configTab === 'kafka' && renderKafkaConfig()}
+      {configTab === 'clickhouse' && renderClickhouseConfig()}
     </div>
   );
 
@@ -472,6 +572,191 @@ function App() {
     </div>
   );
 
+  const renderClickhouseConfig = () => (
+    <div className="clickhouse-config-content">
+      <div className="config-header">
+        <h3>ClickHouse配置管理</h3>
+        <div className="config-actions">
+          <button 
+            onClick={() => setShowConfigForm(!showConfigForm)}
+            className="btn btn-primary"
+          >
+            {showConfigForm ? '取消' : clickhouseConfig ? '编辑配置' : '新建配置'}
+          </button>
+          {clickhouseConfig && (
+            <button 
+              onClick={() => testClickhouseConnectivity(true)}
+              className="btn btn-info"
+            >
+              测试连接
+            </button>
+          )}
+        </div>
+      </div>
+
+      {showConfigForm && (
+        <div className="config-form">
+          <h4>{clickhouseConfig ? '编辑ClickHouse配置' : '创建ClickHouse配置'}</h4>
+          <div className="form-grid">
+            <div className="form-row">
+              <label>配置名称：</label>
+              <input
+                type="text"
+                value={newClickhouseConfig.name}
+                onChange={(e) => setNewClickhouseConfig({...newClickhouseConfig, name: e.target.value})}
+                className="input"
+                placeholder="输入配置名称"
+              />
+            </div>
+            
+            <div className="form-row">
+              <label>主机地址：</label>
+              <input
+                type="text"
+                value={newClickhouseConfig.host}
+                onChange={(e) => setNewClickhouseConfig({...newClickhouseConfig, host: e.target.value})}
+                className="input"
+                placeholder="例如：10.26.64.224"
+              />
+            </div>
+            
+            <div className="form-row">
+              <label>端口：</label>
+              <input
+                type="number"
+                value={newClickhouseConfig.port}
+                onChange={(e) => setNewClickhouseConfig({...newClickhouseConfig, port: parseInt(e.target.value)})}
+                className="input"
+                placeholder="8123"
+              />
+            </div>
+            
+            <div className="form-row">
+              <label>数据库名称：</label>
+              <input
+                type="text"
+                value={newClickhouseConfig.database_name}
+                onChange={(e) => setNewClickhouseConfig({...newClickhouseConfig, database_name: e.target.value})}
+                className="input"
+                placeholder="例如：alerts"
+              />
+            </div>
+
+            <div className="form-row">
+              <label>用户名：</label>
+              <input
+                type="text"
+                value={newClickhouseConfig.username}
+                onChange={(e) => setNewClickhouseConfig({...newClickhouseConfig, username: e.target.value})}
+                className="input"
+                placeholder="default"
+              />
+            </div>
+
+            <div className="form-row">
+              <label>密码：</label>
+              <input
+                type="password"
+                value={newClickhouseConfig.password || ''}
+                onChange={(e) => setNewClickhouseConfig({...newClickhouseConfig, password: e.target.value})}
+                className="input"
+                placeholder="留空表示无密码"
+              />
+            </div>
+
+            <div className="form-row">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={newClickhouseConfig.use_tls}
+                  onChange={(e) => setNewClickhouseConfig({...newClickhouseConfig, use_tls: e.target.checked})}
+                />
+                使用TLS连接
+              </label>
+            </div>
+
+            <div className="form-row">
+              <label>连接超时时间（毫秒）：</label>
+              <input
+                type="number"
+                value={newClickhouseConfig.connection_timeout_ms}
+                onChange={(e) => setNewClickhouseConfig({...newClickhouseConfig, connection_timeout_ms: parseInt(e.target.value)})}
+                className="input"
+              />
+            </div>
+
+            <div className="form-row">
+              <label>请求超时时间（毫秒）：</label>
+              <input
+                type="number"
+                value={newClickhouseConfig.request_timeout_ms}
+                onChange={(e) => setNewClickhouseConfig({...newClickhouseConfig, request_timeout_ms: parseInt(e.target.value)})}
+                className="input"
+              />
+            </div>
+
+            <div className="form-row">
+              <label>最大连接数：</label>
+              <input
+                type="number"
+                value={newClickhouseConfig.max_connections}
+                onChange={(e) => setNewClickhouseConfig({...newClickhouseConfig, max_connections: parseInt(e.target.value)})}
+                className="input"
+              />
+            </div>
+          </div>
+          
+          <button onClick={saveConfig} className="btn btn-primary">
+            {clickhouseConfig ? '更新配置' : '保存配置'}
+          </button>
+
+          {saveResult && (
+            <div className={`result ${saveResult.success ? 'success' : 'error'}`}>
+              <p>{saveResult.message}</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 显示当前配置 */}
+      {clickhouseConfig && (
+        <div className="current-config">
+          <h4>当前ClickHouse配置</h4>
+          <div className="config-card">
+            <div className="config-details">
+              <p><strong>配置名称：</strong> {clickhouseConfig.name}</p>
+              <p><strong>主机地址：</strong> {clickhouseConfig.host}</p>
+              <p><strong>端口：</strong> {clickhouseConfig.port}</p>
+              <p><strong>数据库：</strong> {clickhouseConfig.database_name}</p>
+              <p><strong>用户名：</strong> {clickhouseConfig.username}</p>
+              <p><strong>使用TLS：</strong> {clickhouseConfig.use_tls ? '是' : '否'}</p>
+              <p><strong>连接超时：</strong> {clickhouseConfig.connection_timeout_ms}ms</p>
+              <p><strong>请求超时：</strong> {clickhouseConfig.request_timeout_ms}ms</p>
+              <p><strong>最大连接数：</strong> {clickhouseConfig.max_connections}</p>
+              <p><strong>创建时间：</strong> {new Date(clickhouseConfig.created_at).toLocaleDateString()}</p>
+            </div>
+            
+            <div className="config-actions">
+              <button 
+                onClick={() => setShowConfigForm(true)}
+                className="btn btn-secondary btn-sm"
+              >
+                编辑
+              </button>
+              
+              <button 
+                onClick={() => testClickhouseConnectivity(true)}
+                className="btn btn-info btn-sm"
+              >
+                测试连接
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
   return (
     <div className="app">
       <header className="app-header">
@@ -490,9 +775,9 @@ function App() {
                 🏠 首页
               </button>
             </li>
-            <li className={activeView === 'kafka' ? 'active' : ''}>
-              <button onClick={() => setActiveView('kafka')}>
-                ⚙️ Kafka配置
+            <li className={activeView === 'config' ? 'active' : ''}>
+              <button onClick={() => setActiveView('config')}>
+                ⚙️ 配置
               </button>
             </li>
           </ul>
@@ -501,7 +786,7 @@ function App() {
         {/* 主内容区域 */}
         <main className="main-content">
           {activeView === 'home' && renderHome()}
-          {activeView === 'kafka' && renderKafkaConfig()}
+          {activeView === 'config' && renderConfigPage()}
         </main>
       </div>
 

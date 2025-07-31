@@ -100,3 +100,55 @@ CREATE TRIGGER update_kafka_configs_updated_at
     BEFORE UPDATE ON kafka_configs
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
+
+-- Create clickhouse_config table (only one configuration allowed)
+CREATE TABLE IF NOT EXISTS clickhouse_config (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    name VARCHAR(255) NOT NULL DEFAULT 'default' UNIQUE,
+    host VARCHAR(255) NOT NULL,
+    port INTEGER NOT NULL DEFAULT 8123,
+    database_name VARCHAR(255) NOT NULL,
+    username VARCHAR(255) NOT NULL DEFAULT 'default',
+    password VARCHAR(255),
+    use_tls BOOLEAN NOT NULL DEFAULT false,
+    connection_timeout_ms INTEGER NOT NULL DEFAULT 10000,
+    request_timeout_ms INTEGER NOT NULL DEFAULT 30000,
+    max_connections INTEGER NOT NULL DEFAULT 10,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Create index for clickhouse_config
+CREATE INDEX IF NOT EXISTS idx_clickhouse_config_name ON clickhouse_config (name);
+
+-- Insert default ClickHouse configuration
+INSERT INTO clickhouse_config (
+    name,
+    host,
+    port,
+    database_name,
+    username,
+    password,
+    use_tls,
+    connection_timeout_ms,
+    request_timeout_ms,
+    max_connections
+) VALUES (
+    'default',
+    '10.26.64.224',
+    8123,
+    'default',
+    'default',
+    'default',
+    false,
+    10000,
+    30000,
+    10
+) ON CONFLICT (name) DO NOTHING;
+
+-- Create trigger to automatically update updated_at for clickhouse_config
+DROP TRIGGER IF EXISTS update_clickhouse_config_updated_at ON clickhouse_config;
+CREATE TRIGGER update_clickhouse_config_updated_at
+    BEFORE UPDATE ON clickhouse_config
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();

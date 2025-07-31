@@ -73,6 +73,23 @@ pub struct KafkaConfigRow {
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct ClickHouseConfigRow {
+    pub id: uuid::Uuid,
+    pub name: String,
+    pub host: String,
+    pub port: i32,
+    pub database_name: String,
+    pub username: String,
+    pub password: Option<String>,
+    pub use_tls: bool,
+    pub connection_timeout_ms: i32,
+    pub request_timeout_ms: i32,
+    pub max_connections: i32,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+}
+
 pub struct Database {
     pool: PgPool,
 }
@@ -120,12 +137,20 @@ impl Database {
     pub async fn initialize_schema(&self) -> Result<()> {
         log::info!("🔧 Initializing database schema...");
 
-        // Check if tables already exist
-        let table_exists: bool = sqlx::query_scalar(
+        // Check if tables already exist (check both kafka_configs and clickhouse_config)
+        let kafka_table_exists: bool = sqlx::query_scalar(
             "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'kafka_configs')"
         )
         .fetch_one(&self.pool)
         .await?;
+
+        let clickhouse_table_exists: bool = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'clickhouse_config')"
+        )
+        .fetch_one(&self.pool)
+        .await?;
+
+        let table_exists = kafka_table_exists && clickhouse_table_exists;
 
         if table_exists {
             log::info!("✅ Database schema already exists, skipping initialization");
@@ -314,5 +339,92 @@ impl Database {
 
         let test_value: i32 = row.get("test");
         Ok(test_value == 1)
+    }
+
+    // ClickHouse configuration methods
+    pub async fn get_clickhouse_config(&self) -> Result<Option<ClickHouseConfigRow>> {
+        let row = sqlx::query_as::<_, ClickHouseConfigRow>(
+            "SELECT * FROM clickhouse_config ORDER BY created_at ASC LIMIT 1"
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row)
+    }
+
+    pub async fn create_or_update_clickhouse_config(&self, config: &ClickHouseConfigRow) -> Result<uuid::Uuid> {
+        // First, check if any config exists
+        let existing_config = self.get_clickhouse_config().await?;
+        
+        if let Some(existing) = existing_config {
+            // Update existing config
+            let now = chrono::Utc::now();
+            
+            sqlx::query(
+                r#"
+                UPDATE clickhouse_config SET
+                    name = $2, host = $3, port = $4, database_name = $5,
+                    username = $6, password = $7, use_tls = $8,
+                    connection_timeout_ms = $9, request_timeout_ms = $10, max_connections = $11,
+                    updated_at = $12
+                WHERE id = $1
+                "#
+            )
+            .bind(&existing.id)
+            .bind(&config.name)
+            .bind(&config.host)
+            .bind(&config.port)
+            .bind(&config.database_name)
+            .bind(&config.username)
+            .bind(&config.password)
+            .bind(&config.use_tls)
+            .bind(&config.connection_timeout_ms)
+            .bind(&config.request_timeout_ms)
+            .bind(&config.max_connections)
+            .bind(&now)
+            .execute(&self.pool)
+            .await?;
+
+            Ok(existing.id)
+        } else {
+            // Create new config
+            let id = uuid::Uuid::new_v4();
+            let now = chrono::Utc::now();
+
+            sqlx::query(
+                r#"
+                INSERT INTO clickhouse_config (
+                    id, name, host, port, database_name, username, password, use_tls,
+                    connection_timeout_ms, request_timeout_ms, max_connections,
+                    created_at, updated_at
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                "#
+            )
+            .bind(&id)
+            .bind(&config.name)
+            .bind(&config.host)
+            .bind(&config.port)
+            .bind(&config.database_name)
+            .bind(&config.username)
+            .bind(&config.password)
+            .bind(&config.use_tls)
+            .bind(&config.connection_timeout_ms)
+            .bind(&config.request_timeout_ms)
+            .bind(&config.max_connections)
+            .bind(&now)
+            .bind(&now)
+            .execute(&self.pool)
+            .await?;
+
+            Ok(id)
+        }
+    }
+
+    pub async fn delete_clickhouse_config(&self) -> Result<()> {
+        sqlx::query("DELETE FROM clickhouse_config")
+            .execute(&self.pool)
+            .await?;
+
+        Ok(())
     }
 }
