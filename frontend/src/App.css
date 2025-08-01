@@ -1354,6 +1354,33 @@ select.input {
   font-size: 1.8rem;
 }
 
+.header-controls {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.refresh-interval-select {
+  padding: 0.75rem 1rem;
+  border-radius: 6px;
+  border: 1px solid #cbd5e0;
+  background: white;
+  color: #2d3748;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.refresh-interval-select:hover {
+  border-color: #3182ce;
+}
+
+.refresh-interval-select:focus {
+  outline: none;
+  border-color: #3182ce;
+  box-shadow: 0 0 0 3px rgba(49, 130, 206, 0.1);
+}
+
 .refresh-button {
   background: #3182ce;
   color: white;

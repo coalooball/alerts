@@ -8,10 +8,38 @@ const AlertData = () => {
   const [showDetail, setShowDetail] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [alertsPerPage] = useState(20);
+  const [refreshInterval, setRefreshInterval] = useState(() => {
+    // Load saved refresh interval from localStorage
+    const saved = localStorage.getItem('alertRefreshInterval');
+    return saved ? parseInt(saved, 10) : 0;
+  });
+  const [autoRefreshTimer, setAutoRefreshTimer] = useState(null);
 
   useEffect(() => {
     fetchAlerts();
   }, [currentPage]);
+
+  // Save refresh interval to localStorage when it changes
+  useEffect(() => {
+    localStorage.setItem('alertRefreshInterval', refreshInterval.toString());
+  }, [refreshInterval]);
+
+  useEffect(() => {
+    if (refreshInterval > 0) {
+      const timer = setInterval(() => {
+        fetchAlerts();
+      }, refreshInterval * 1000);
+      setAutoRefreshTimer(timer);
+      return () => {
+        clearInterval(timer);
+      };
+    } else {
+      if (autoRefreshTimer) {
+        clearInterval(autoRefreshTimer);
+        setAutoRefreshTimer(null);
+      }
+    }
+  }, [refreshInterval, currentPage]);
 
   const fetchAlerts = async () => {
     setLoading(true);
@@ -228,9 +256,26 @@ const AlertData = () => {
     <div className="alert-data-container">
       <div className="alert-data-header">
         <h2>告警数据</h2>
-        <button onClick={fetchAlerts} className="refresh-button" disabled={loading}>
-          {loading ? '⏳ 加载中...' : '🔄 刷新'}
-        </button>
+        <div className="header-controls">
+          <select 
+            className="refresh-interval-select"
+            value={refreshInterval}
+            onChange={(e) => {
+              const newInterval = Number(e.target.value);
+              setRefreshInterval(newInterval);
+            }}
+          >
+            <option value={0}>手动刷新</option>
+            <option value={5}>每 5 秒</option>
+            <option value={10}>每 10 秒</option>
+            <option value={30}>每 30 秒</option>
+            <option value={60}>每 1 分钟</option>
+            <option value={300}>每 5 分钟</option>
+          </select>
+          <button onClick={fetchAlerts} className="refresh-button" disabled={loading}>
+            {loading ? '⏳ 加载中...' : '🔄 刷新'}
+          </button>
+        </div>
       </div>
 
       {loading ? (

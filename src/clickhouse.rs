@@ -200,17 +200,10 @@ impl ClickHouseConnection {
         self.client.query("CREATE DATABASE IF NOT EXISTS alerts").execute().await
             .map_err(|e| anyhow::anyhow!("Failed to create ClickHouse database: {}", e))?;
 
-        // Check if tables exist with correct schema
-        let need_recreation = self.check_tables_need_recreation().await?;
+        // Only check and create tables if they don't exist - never drop in normal mode
+        log::info!("📄 Creating ClickHouse tables if not exists...");
         
-        if need_recreation {
-            log::info!("🔄 Dropping existing tables to recreate with correct DateTime64(3) schema...");
-            self.drop_existing_tables().await?;
-        }
-
-        log::info!("📄 Creating ClickHouse tables...");
-        
-        // Create tables directly with SQL
+        // Create tables directly with SQL (IF NOT EXISTS ensures no data loss)
         self.create_common_alerts_table().await?;
         self.create_edr_alerts_table().await?;
         self.create_ngav_alerts_table().await?;
@@ -393,23 +386,6 @@ impl ClickHouseConnection {
         let count: u64 = self.client.query(query).fetch_one().await?;
         
         Ok(count == 3)
-    }
-
-    async fn check_tables_need_recreation(&self) -> Result<bool> {
-        // Check if any table has string datetime fields (old schema)
-        let query = r#"
-            SELECT count(*) as string_datetime_count
-            FROM system.columns 
-            WHERE database = 'alerts' 
-            AND table IN ('common_alerts', 'edr_alerts', 'ngav_alerts')
-            AND name IN ('create_time', 'processed_time', 'last_update_time', 'first_event_time', 'last_event_time', 'workflow_last_update_time')
-            AND type = 'String'
-        "#;
-        
-        let count: u64 = self.client.query(query).fetch_one().await.unwrap_or(0);
-        
-        // If any datetime field is String type, we need recreation
-        Ok(count > 0)
     }
 
     async fn drop_existing_tables(&self) -> Result<()> {

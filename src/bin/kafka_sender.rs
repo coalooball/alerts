@@ -7,14 +7,23 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::fs::File;
 
 use alerts::{AlertMessage, EdrAlert, NgavAlert, KafkaConfig, KafkaProducer};
+use alerts::kafka::{KafkaProducerConfig, KafkaConsumerConfig};
 
 #[derive(Parser)]
 #[command(name = "kafka-sender")]
 #[command(about = "Send JSONL data to Kafka with configurable rate and data type")]
 struct Args {
-    /// Path to configuration file
-    #[arg(short, long, default_value = "config.toml")]
-    config: PathBuf,
+    /// Kafka bootstrap servers (e.g., localhost:9092)
+    #[arg(short = 'b', long)]
+    bootstrap_servers: String,
+
+    /// Kafka topic to send messages to
+    #[arg(short = 'o', long)]
+    topic: String,
+
+    /// Kafka consumer group ID
+    #[arg(short = 'g', long)]
+    group_id: String,
 
     /// Path to JSONL data file
     #[arg(short, long)]
@@ -60,25 +69,29 @@ async fn main() -> Result<()> {
     }
 
     info!("🚀 Starting Kafka Sender");
-    info!("Configuration: {:?}", args.config);
-    info!("Data file: {:?}", args.data);
-    info!("Data type: {:?}", args.data_type);
-    info!("Send rate: {} messages/second", args.rate);
+    info!("📡 Kafka broker: {}", args.bootstrap_servers);
+    info!("📂 Topic: {}", args.topic);
+    info!("👥 Group ID: {}", args.group_id);
+    info!("📄 Data file: {:?}", args.data);
+    info!("📊 Data type: {:?}", args.data_type);
+    info!("⚡ Send rate: {} messages/second", args.rate);
 
-    // Load configuration
-    let config = match KafkaConfig::from_file(&args.config.to_str().unwrap()) {
-        Ok(config) => {
-            info!("✅ Loaded configuration from {:?}", args.config);
-            info!("📡 Kafka broker: {}", config.bootstrap_servers);
-            info!("📂 Topic: {}", config.topic);
-            config
-        }
-        Err(e) => {
-            warn!("Failed to load config from {:?}: {}. Using default configuration.", args.config, e);
-            let default_config = KafkaConfig::default();
-            info!("📡 Using default Kafka broker: {}", default_config.bootstrap_servers);
-            default_config
-        }
+    // Create configuration from command line args with default producer/consumer settings
+    let config = KafkaConfig {
+        bootstrap_servers: args.bootstrap_servers.clone(),
+        topic: args.topic.clone(),
+        group_id: args.group_id.clone(),
+        producer: KafkaProducerConfig {
+            message_timeout_ms: 5000,
+            request_timeout_ms: 5000,
+            retry_backoff_ms: 100,
+            retries: 3,
+        },
+        consumer: KafkaConsumerConfig {
+            auto_offset_reset: "earliest".to_string(),
+            enable_auto_commit: true,
+            auto_commit_interval_ms: 1000,
+        },
     };
 
     // Create producer

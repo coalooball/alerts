@@ -47,12 +47,14 @@ A standalone binary for sending JSONL data to Kafka with configurable parameters
 #### Usage
 
 ```bash
-kafka-sender [OPTIONS] --data <DATA> --data-type <DATA_TYPE>
+kafka-sender [OPTIONS] --bootstrap-servers <SERVERS> --topic <TOPIC> --group-id <GROUP_ID> --data <DATA> --data-type <DATA_TYPE>
 ```
 
 #### Options
 
-- `-c, --config <CONFIG>` - Path to configuration file (default: config.toml)
+- `-b, --bootstrap-servers <SERVERS>` - Kafka bootstrap servers (e.g., localhost:9092) (required)
+- `-o, --topic <TOPIC>` - Kafka topic to send messages to (required)
+- `-g, --group-id <GROUP_ID>` - Kafka consumer group ID (required)
 - `-d, --data <DATA>` - Path to JSONL data file (required)
 - `-t, --data-type <DATA_TYPE>` - Data type: alert, edr, ngav (required)
 - `-r, --rate <RATE>` - Send rate in messages per second (default: 10)
@@ -61,27 +63,64 @@ kafka-sender [OPTIONS] --data <DATA> --data-type <DATA_TYPE>
 
 #### Examples
 
-```bash
-# Send generic alert data at 5 messages/second
-./target/debug/kafka-sender \
-  --data test_alerts.jsonl \
-  --data-type alert \
-  --rate 5
+##### Simple Example
 
-# Send EDR alerts with rate limiting and message count limit
+```bash
+# Send alerts to local Kafka
 ./target/debug/kafka-sender \
-  --config config.toml \
+  --bootstrap-servers localhost:9092 \
+  --topic alerts \
+  --group-id my-group \
+  --data test_alerts.jsonl \
+  --data-type alert
+```
+
+##### Complete Example
+
+```bash
+# Send EDR alerts with all options configured
+./target/debug/kafka-sender \
+  --bootstrap-servers 10.26.64.224:9093 \
+  --topic edr-alerts-topic \
+  --group-id edr-consumer-group \
   --data atlasv2/data/attack/h1/cbc-edr-alerts/edr-alerts-h1-m1.jsonl \
   --data-type edr \
-  --rate 20 \
-  --max-messages 100 \
+  --rate 50 \
+  --max-messages 1000 \
   --verbose
+```
 
-# Send NGAV alerts at high rate
+##### Additional Examples
+
+```bash
+# Send NGAV alerts at high rate to production Kafka
 ./target/debug/kafka-sender \
+  --bootstrap-servers prod-kafka-01:9092,prod-kafka-02:9092 \
+  --topic ngav-alerts \
+  --group-id ngav-processors \
   --data atlasv2/data/attack/h1/cbc-ngav-alerts/ngav-alerts-h1-m1.jsonl \
   --data-type ngav \
-  --rate 50
+  --rate 100
+
+# Send 10,000 test EDR alerts with rate limiting
+./target/debug/kafka-sender \
+  --bootstrap-servers 10.26.64.224:9093 \
+  --topic alerts-edr \
+  --group-id 1 \
+  --data fixtures/edr-alerts-test-10k.jsonl \
+  --data-type edr \
+  --rate 2 \
+  --max-messages 5000
+
+# Send generic alerts with verbose logging for debugging
+./target/debug/kafka-sender \
+  --bootstrap-servers 10.26.64.224:9093 \
+  --topic alerts-ngav \
+  --group-id debug-group \
+  --data fixtures/ngav-alerts-test-10k.jsonl \
+  --data-type ngav \
+  --rate 1 \
+  --verbose
 ```
 
 ### kafka-consumer
