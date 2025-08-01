@@ -536,6 +536,33 @@ select.input {
   margin-top: 1rem;
 }
 
+.active-configs-inline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-top: 0.5rem;
+  font-size: 0.95rem;
+  line-height: 1.8;
+  color: #4a5568;
+}
+
+.active-configs-inline .config-item {
+  cursor: pointer;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  transition: background-color 0.2s;
+}
+
+.active-configs-inline .config-item:hover {
+  background-color: rgba(56, 161, 105, 0.1);
+}
+
+.active-configs-inline .separator {
+  color: #cbd5e0;
+  margin: 0 0.25rem;
+  font-weight: 300;
+}
+
 .active-config-badge {
   display: flex;
   align-items: center;
