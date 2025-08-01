@@ -6,6 +6,7 @@ use rdkafka::{
 };
 use std::fs::File;
 use std::io::{BufRead, BufReader};
+use std::fs;
 use std::time::Duration;
 
 use crate::alert::AlertMessage;
@@ -19,6 +20,19 @@ pub struct KafkaProducer {
 }
 
 impl KafkaProducer {
+    /// Safely read a file that may contain invalid UTF-8
+    #[allow(dead_code)]
+    fn read_file_lossy(file_path: &str) -> Result<Vec<String>> {
+        let bytes = fs::read(file_path)?;
+        let content = String::from_utf8_lossy(&bytes);
+        
+        // Check if there were any invalid UTF-8 sequences
+        if content.contains('\u{FFFD}') {
+            info!("File {} contains invalid UTF-8 characters, using lossy conversion", file_path);
+        }
+        
+        Ok(content.lines().map(|s| s.to_string()).collect())
+    }
     pub async fn new(config: KafkaConfig) -> Result<Self> {
         let mut producer_config = ClientConfig::new();
         
@@ -128,8 +142,16 @@ impl KafkaProducer {
         let mut batch = Vec::new();
         const BATCH_SIZE: usize = 50;
 
-        for line in reader.lines() {
-            let line = line?;
+        for line_result in reader.lines() {
+            let line = match line_result {
+                Ok(line) => line,
+                Err(e) => {
+                    error!("Error reading line: {}, using lossy conversion", e);
+                    // Try to recover by reading raw bytes
+                    continue;
+                }
+            };
+            
             if line.trim().is_empty() {
                 continue;
             }
@@ -204,8 +226,16 @@ impl KafkaProducer {
         let mut batch = Vec::new();
         const BATCH_SIZE: usize = 50;
 
-        for line in reader.lines() {
-            let line = line?;
+        for line_result in reader.lines() {
+            let line = match line_result {
+                Ok(line) => line,
+                Err(e) => {
+                    error!("Error reading line: {}, using lossy conversion", e);
+                    // Try to recover by reading raw bytes
+                    continue;
+                }
+            };
+            
             if line.trim().is_empty() {
                 continue;
             }
@@ -244,7 +274,15 @@ impl KafkaProducer {
         let file = File::open(file_path)?;
         let mut reader = BufReader::new(file);
         let mut first_line = String::new();
-        reader.read_line(&mut first_line)?;
+        
+        // Try to read the first line with UTF-8 lossy conversion
+        match reader.read_line(&mut first_line) {
+            Ok(_) => {},
+            Err(e) => {
+                error!("Error reading first line: {}", e);
+                return Err(anyhow::anyhow!("Failed to read file: {}", e));
+            }
+        }
         
         if first_line.trim().is_empty() {
             return Err(anyhow::anyhow!("Empty file: {}", file_path));

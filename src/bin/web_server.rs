@@ -203,10 +203,9 @@ async fn main() -> Result<()> {
     let database = if init_db {
         info!("🗄️ Initializing database (drop and recreate)...");
         match Database::new_with_init(db_config).await {
-            Ok(_db) => {
-                info!("✅ Database initialized successfully");
-                info!("🎉 Database initialization completed. Exiting...");
-                return Ok(());
+            Ok(db) => {
+                info!("✅ PostgreSQL database initialized successfully");
+                Arc::new(db)
             }
             Err(e) => {
                 error!("❌ Failed to initialize database: {}", e);
@@ -272,7 +271,14 @@ async fn main() -> Result<()> {
                         None
                     } else {
                         info!("✅ ClickHouse connection established");
-                        if let Err(e) = ch.initialize_tables().await {
+                        // Use reinitialize_tables in init mode, otherwise use initialize_tables
+                        let init_result = if init_db {
+                            ch.reinitialize_tables().await
+                        } else {
+                            ch.initialize_tables().await
+                        };
+                        
+                        if let Err(e) = init_result {
                             error!("❌ Failed to initialize ClickHouse tables: {}", e);
                         } else {
                             info!("✅ ClickHouse tables initialized");
@@ -295,6 +301,12 @@ async fn main() -> Result<()> {
             None
         }
     };
+
+    // Exit early if in init mode
+    if init_db {
+        info!("🎉 Database and ClickHouse initialization completed. Exiting...");
+        return Ok(());
+    }
 
     // Initialize consumer service if ClickHouse is available
     let consumer_service = if let Some(ch) = &clickhouse {

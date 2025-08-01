@@ -1,10 +1,23 @@
 use anyhow::Result;
 use clickhouse::{Client, Row};
 use serde::{Deserialize, Serialize};
-use std::fs;
 use chrono::{DateTime, Utc};
 
 use crate::{edr_alert::EdrAlert, ngav_alert::NgavAlert, database::ClickHouseConfigRow};
+
+// Helper function to parse ISO 8601 datetime strings and format for ClickHouse DateTime64(3)
+fn parse_datetime_for_clickhouse(datetime_str: &str) -> String {
+    // Try parsing with Z suffix first
+    if let Ok(dt) = DateTime::parse_from_rfc3339(datetime_str) {
+        // Convert to ClickHouse DateTime64(3) format: YYYY-MM-DD HH:MM:SS.sss
+        return dt.format("%Y-%m-%d %H:%M:%S%.3f").to_string();
+    }
+    
+    // Fallback to current time if parsing fails
+    log::warn!("Failed to parse datetime '{}', using current time", datetime_str);
+    Utc::now().format("%Y-%m-%d %H:%M:%S%.3f").to_string()
+}
+
 
 #[derive(Clone)]
 pub struct ClickHouseConnection {
@@ -16,7 +29,7 @@ pub struct ClickHouseConnection {
 pub struct CommonAlert {
     pub id: String,
     pub data_type: String,
-    pub create_time: DateTime<Utc>,
+    pub create_time: String,
     pub device_id: u64,
     pub device_name: String,
     pub device_os: String,
@@ -28,7 +41,7 @@ pub struct CommonAlert {
     pub threat_category: String,
     pub device_username: String,
     pub raw_data: String,
-    pub processed_time: DateTime<Utc>,
+    pub processed_time: String,
     pub kafka_topic: String,
     pub kafka_partition: u32,
     pub kafka_offset: u64,
@@ -38,7 +51,7 @@ pub struct CommonAlert {
 pub struct EdrAlertRow {
     pub id: String,
     pub schema: u32,
-    pub create_time: DateTime<Utc>,
+    pub create_time: String,
     pub device_external_ip: String,
     pub device_id: u64,
     pub device_internal_ip: String,
@@ -69,7 +82,7 @@ pub struct EdrAlertRow {
     pub severity: u8,
     pub alert_type: String,
     pub watchlists: Vec<String>,
-    pub processed_time: DateTime<Utc>,
+    pub processed_time: String,
     pub kafka_topic: String,
     pub kafka_partition: u32,
     pub kafka_offset: u64,
@@ -81,10 +94,10 @@ pub struct NgavAlertRow {
     pub alert_type: String,
     pub legacy_alert_id: String,
     pub org_key: String,
-    pub create_time: DateTime<Utc>,
-    pub last_update_time: DateTime<Utc>,
-    pub first_event_time: DateTime<Utc>,
-    pub last_event_time: DateTime<Utc>,
+    pub create_time: String,
+    pub last_update_time: String,
+    pub first_event_time: String,
+    pub last_event_time: String,
     pub threat_id: String,
     pub severity: u8,
     pub category: String,
@@ -122,7 +135,7 @@ pub struct NgavAlertRow {
     pub kill_chain_status: Vec<String>,
     pub run_state: String,
     pub policy_applied: String,
-    pub processed_time: DateTime<Utc>,
+    pub processed_time: String,
     pub kafka_topic: String,
     pub kafka_partition: u32,
     pub kafka_offset: u64,
@@ -145,6 +158,34 @@ impl ClickHouseConnection {
         Ok(Self { client, config })
     }
 
+    // Helper function to clean string fields and ensure valid UTF-8
+    fn clean_string(s: String) -> String {
+        if s.is_empty() {
+            s
+        } else {
+            String::from_utf8_lossy(s.as_bytes()).to_string()
+        }
+    }
+
+    // Helper function to clean CommonAlert
+    fn clean_common_alert(&self, mut alert: CommonAlert) -> CommonAlert {
+        alert.id = Self::clean_string(alert.id);
+        alert.data_type = Self::clean_string(alert.data_type);
+        alert.create_time = Self::clean_string(alert.create_time);
+        alert.device_name = Self::clean_string(alert.device_name);
+        alert.device_os = Self::clean_string(alert.device_os);
+        alert.device_internal_ip = Self::clean_string(alert.device_internal_ip);
+        alert.device_external_ip = Self::clean_string(alert.device_external_ip);
+        alert.org_key = Self::clean_string(alert.org_key);
+        alert.alert_type = Self::clean_string(alert.alert_type);
+        alert.threat_category = Self::clean_string(alert.threat_category);
+        alert.device_username = Self::clean_string(alert.device_username);
+        alert.raw_data = Self::clean_string(alert.raw_data);
+        alert.processed_time = Self::clean_string(alert.processed_time);
+        alert.kafka_topic = Self::clean_string(alert.kafka_topic);
+        alert
+    }
+
     pub async fn test_connection(&self) -> Result<bool> {
         let query = "SELECT 1";
         let result: u8 = self.client.query(query).fetch_one().await?;
@@ -159,12 +200,12 @@ impl ClickHouseConnection {
         self.client.query("CREATE DATABASE IF NOT EXISTS alerts").execute().await
             .map_err(|e| anyhow::anyhow!("Failed to create ClickHouse database: {}", e))?;
 
-        // Check if tables exist
-        let tables_exist = self.check_tables_exist().await?;
+        // Check if tables exist with correct schema
+        let need_recreation = self.check_tables_need_recreation().await?;
         
-        if tables_exist {
-            log::info!("✅ ClickHouse tables already exist, skipping initialization");
-            return Ok(());
+        if need_recreation {
+            log::info!("🔄 Dropping existing tables to recreate with correct DateTime64(3) schema...");
+            self.drop_existing_tables().await?;
         }
 
         log::info!("📄 Creating ClickHouse tables...");
@@ -178,12 +219,36 @@ impl ClickHouseConnection {
         Ok(())
     }
 
+    /// Force reinitialize tables (drop and recreate)
+    pub async fn reinitialize_tables(&self) -> Result<()> {
+        log::info!("🔄 Force reinitializing ClickHouse tables (drop and recreate)...");
+
+        // First, create the database if it doesn't exist
+        log::info!("📊 Creating ClickHouse database 'alerts' if not exists...");
+        self.client.query("CREATE DATABASE IF NOT EXISTS alerts").execute().await
+            .map_err(|e| anyhow::anyhow!("Failed to create ClickHouse database: {}", e))?;
+
+        // Always drop existing tables in reinitialize mode
+        log::info!("🗑️ Dropping existing tables...");
+        self.drop_existing_tables().await?;
+
+        log::info!("📄 Creating fresh ClickHouse tables...");
+        
+        // Create tables directly with SQL
+        self.create_common_alerts_table().await?;
+        self.create_edr_alerts_table().await?;
+        self.create_ngav_alerts_table().await?;
+
+        log::info!("✅ ClickHouse tables reinitialized successfully");
+        Ok(())
+    }
+
     async fn create_common_alerts_table(&self) -> Result<()> {
         let query = r#"
             CREATE TABLE IF NOT EXISTS alerts.common_alerts (
                 id String,
-                data_type Enum8('edr' = 1, 'ngav' = 2, 'other' = 3),
-                create_time DateTime64(3),
+                data_type String,
+                create_time String,
                 device_id UInt64,
                 device_name String,
                 device_os String,
@@ -195,12 +260,12 @@ impl ClickHouseConnection {
                 threat_category String,
                 device_username String,
                 raw_data String,
-                processed_time DateTime64(3) DEFAULT now64(),
+                processed_time String,
                 kafka_topic String,
                 kafka_partition UInt32,
                 kafka_offset UInt64
             ) ENGINE = MergeTree()
-            PARTITION BY toYYYYMM(create_time)
+            PARTITION BY toYYYYMM(parseDateTimeBestEffort(create_time))
             ORDER BY (data_type, create_time, device_id)
         "#;
         
@@ -213,7 +278,7 @@ impl ClickHouseConnection {
             CREATE TABLE IF NOT EXISTS alerts.edr_alerts (
                 id String,
                 schema UInt32,
-                create_time DateTime64(3),
+                create_time String,
                 device_external_ip String,
                 device_id UInt64,
                 device_internal_ip String,
@@ -244,12 +309,12 @@ impl ClickHouseConnection {
                 severity UInt8,
                 alert_type String,
                 watchlists Array(String),
-                processed_time DateTime64(3) DEFAULT now64(),
+                processed_time String,
                 kafka_topic String,
                 kafka_partition UInt32,
                 kafka_offset UInt64
             ) ENGINE = MergeTree()
-            PARTITION BY toYYYYMM(create_time)
+            PARTITION BY toYYYYMM(parseDateTimeBestEffort(create_time))
             ORDER BY (create_time, device_id, report_id)
         "#;
         
@@ -264,10 +329,10 @@ impl ClickHouseConnection {
                 alert_type String,
                 legacy_alert_id String,
                 org_key String,
-                create_time DateTime64(3),
-                last_update_time DateTime64(3),
-                first_event_time DateTime64(3),
-                last_event_time DateTime64(3),
+                create_time String,
+                last_update_time String,
+                first_event_time String,
+                last_event_time String,
                 threat_id String,
                 severity UInt8,
                 category String,
@@ -305,12 +370,12 @@ impl ClickHouseConnection {
                 kill_chain_status Array(String),
                 run_state String,
                 policy_applied String,
-                processed_time DateTime64(3) DEFAULT now64(),
+                processed_time String,
                 kafka_topic String,
                 kafka_partition UInt32,
                 kafka_offset UInt64
             ) ENGINE = MergeTree()
-            PARTITION BY toYYYYMM(create_time)
+            PARTITION BY toYYYYMM(parseDateTimeBestEffort(create_time))
             ORDER BY (create_time, device_id, threat_id)
         "#;
         
@@ -328,6 +393,39 @@ impl ClickHouseConnection {
         let count: u64 = self.client.query(query).fetch_one().await?;
         
         Ok(count == 3)
+    }
+
+    async fn check_tables_need_recreation(&self) -> Result<bool> {
+        // Check if any table has string datetime fields (old schema)
+        let query = r#"
+            SELECT count(*) as string_datetime_count
+            FROM system.columns 
+            WHERE database = 'alerts' 
+            AND table IN ('common_alerts', 'edr_alerts', 'ngav_alerts')
+            AND name IN ('create_time', 'processed_time', 'last_update_time', 'first_event_time', 'last_event_time', 'workflow_last_update_time')
+            AND type = 'String'
+        "#;
+        
+        let count: u64 = self.client.query(query).fetch_one().await.unwrap_or(0);
+        
+        // If any datetime field is String type, we need recreation
+        Ok(count > 0)
+    }
+
+    async fn drop_existing_tables(&self) -> Result<()> {
+        // Drop tables in dependency order
+        let tables = ["common_alerts", "edr_alerts", "ngav_alerts"];
+        
+        for table in &tables {
+            let query = format!("DROP TABLE IF EXISTS alerts.{}", table);
+            if let Err(e) = self.client.query(&query).execute().await {
+                log::warn!("Failed to drop table {}: {}", table, e);
+            } else {
+                log::info!("Dropped table alerts.{}", table);
+            }
+        }
+        
+        Ok(())
     }
 
     pub async fn insert_common_alert(&self, alert: &CommonAlert) -> Result<()> {
@@ -503,7 +601,8 @@ impl ClickHouseConnection {
             limit, offset
         );
 
-        let alerts = self.client.query(&query).fetch_all().await?;
+        let alerts: Vec<CommonAlert> = self.client.query(&query).fetch_all().await?;
+        
         Ok(alerts)
     }
 
@@ -513,7 +612,7 @@ impl ClickHouseConnection {
         let mut cursor = self.client.query(query).bind(id).fetch()?;
         
         if let Some(row) = cursor.next().await? {
-            Ok(Some(row))
+            Ok(Some(self.clean_common_alert(row)))
         } else {
             Ok(None)
         }
@@ -557,7 +656,7 @@ impl ClickHouseConnection {
         struct AlertCountRow {
             data_type: String,
             count: u64,
-            latest_time: DateTime<Utc>,
+            latest_time: String,
         }
 
         let rows: Vec<AlertCountRow> = self.client.query(query).fetch_all().await?;
@@ -577,14 +676,11 @@ impl ClickHouseConnection {
 // Conversion functions from original alert types to ClickHouse row types
 impl From<&EdrAlert> for CommonAlert {
     fn from(edr: &EdrAlert) -> Self {
-        let create_time = chrono::DateTime::parse_from_rfc3339(&edr.create_time)
-            .unwrap_or_else(|_| chrono::Utc::now().into())
-            .with_timezone(&chrono::Utc);
 
         Self {
             id: edr.get_alert_key(),
             data_type: "edr".to_string(),
-            create_time,
+            create_time: parse_datetime_for_clickhouse(&edr.create_time),
             device_id: edr.device_id,
             device_name: edr.device_name.clone(),
             device_os: edr.device_os.clone(),
@@ -596,7 +692,7 @@ impl From<&EdrAlert> for CommonAlert {
             threat_category: "".to_string(), // EDR doesn't have threat_category
             device_username: edr.process_username.clone(),
             raw_data: serde_json::to_string(edr).unwrap_or_default(),
-            processed_time: chrono::Utc::now(),
+            processed_time: Utc::now().format("%Y-%m-%d %H:%M:%S%.3f").to_string(),
             kafka_topic: "".to_string(),
             kafka_partition: 0,
             kafka_offset: 0,
@@ -606,14 +702,11 @@ impl From<&EdrAlert> for CommonAlert {
 
 impl From<&NgavAlert> for CommonAlert {
     fn from(ngav: &NgavAlert) -> Self {
-        let create_time = chrono::DateTime::parse_from_rfc3339(&ngav.create_time)
-            .unwrap_or_else(|_| chrono::Utc::now().into())
-            .with_timezone(&chrono::Utc);
 
         Self {
             id: ngav.get_alert_key(),
             data_type: "ngav".to_string(),
-            create_time,
+            create_time: parse_datetime_for_clickhouse(&ngav.create_time),
             device_id: ngav.device_id,
             device_name: ngav.device_name.clone(),
             device_os: ngav.device_os.clone(),
@@ -625,7 +718,7 @@ impl From<&NgavAlert> for CommonAlert {
             threat_category: ngav.threat_cause_threat_category.clone(),
             device_username: ngav.device_username.clone(),
             raw_data: serde_json::to_string(ngav).unwrap_or_default(),
-            processed_time: chrono::Utc::now(),
+            processed_time: Utc::now().format("%Y-%m-%d %H:%M:%S%.3f").to_string(),
             kafka_topic: "".to_string(),
             kafka_partition: 0,
             kafka_offset: 0,
@@ -635,14 +728,11 @@ impl From<&NgavAlert> for CommonAlert {
 
 impl From<&EdrAlert> for EdrAlertRow {
     fn from(edr: &EdrAlert) -> Self {
-        let create_time = chrono::DateTime::parse_from_rfc3339(&edr.create_time)
-            .unwrap_or_else(|_| chrono::Utc::now().into())
-            .with_timezone(&chrono::Utc);
 
         Self {
             id: edr.get_alert_key(),
             schema: edr.schema as u32,
-            create_time,
+            create_time: parse_datetime_for_clickhouse(&edr.create_time),
             device_external_ip: edr.device_external_ip.clone(),
             device_id: edr.device_id,
             device_internal_ip: edr.device_internal_ip.clone(),
@@ -673,7 +763,7 @@ impl From<&EdrAlert> for EdrAlertRow {
             severity: edr.severity,
             alert_type: edr.alert_type.clone(),
             watchlists: edr.watchlists.iter().map(|w| w.name.clone()).collect(),
-            processed_time: chrono::Utc::now(),
+            processed_time: Utc::now().format("%Y-%m-%d %H:%M:%S%.3f").to_string(),
             kafka_topic: "".to_string(),
             kafka_partition: 0,
             kafka_offset: 0,
@@ -683,31 +773,16 @@ impl From<&EdrAlert> for EdrAlertRow {
 
 impl From<&NgavAlert> for NgavAlertRow {
     fn from(ngav: &NgavAlert) -> Self {
-        let create_time = chrono::DateTime::parse_from_rfc3339(&ngav.create_time)
-            .unwrap_or_else(|_| chrono::Utc::now().into())
-            .with_timezone(&chrono::Utc);
-        
-        let last_update_time = chrono::DateTime::parse_from_rfc3339(&ngav.last_update_time)
-            .unwrap_or_else(|_| chrono::Utc::now().into())
-            .with_timezone(&chrono::Utc);
-        
-        let first_event_time = chrono::DateTime::parse_from_rfc3339(&ngav.first_event_time)
-            .unwrap_or_else(|_| chrono::Utc::now().into())
-            .with_timezone(&chrono::Utc);
-        
-        let last_event_time = chrono::DateTime::parse_from_rfc3339(&ngav.last_event_time)
-            .unwrap_or_else(|_| chrono::Utc::now().into())
-            .with_timezone(&chrono::Utc);
 
         Self {
             id: ngav.get_alert_key(),
             alert_type: ngav.alert_type.clone(),
             legacy_alert_id: ngav.legacy_alert_id.clone(),
             org_key: ngav.org_key.clone(),
-            create_time,
-            last_update_time,
-            first_event_time,
-            last_event_time,
+            create_time: parse_datetime_for_clickhouse(&ngav.create_time),
+            last_update_time: parse_datetime_for_clickhouse(&ngav.last_update_time),
+            first_event_time: parse_datetime_for_clickhouse(&ngav.first_event_time),
+            last_event_time: parse_datetime_for_clickhouse(&ngav.last_event_time),
             threat_id: ngav.threat_id.clone(),
             severity: ngav.severity,
             category: ngav.category.clone(),
@@ -721,7 +796,7 @@ impl From<&NgavAlert> for NgavAlertRow {
             target_value: ngav.target_value.clone(),
             workflow_state: ngav.workflow.state.clone(),
             workflow_remediation: ngav.workflow.remediation.clone(),
-            workflow_last_update_time: ngav.workflow.last_update_time.clone(),
+            workflow_last_update_time: parse_datetime_for_clickhouse(&ngav.workflow.last_update_time),
             workflow_comment: ngav.workflow.comment.clone(),
             workflow_changed_by: ngav.workflow.changed_by.clone(),
             device_internal_ip: ngav.device_internal_ip.clone(),
@@ -747,7 +822,7 @@ impl From<&NgavAlert> for NgavAlertRow {
             kill_chain_status: ngav.kill_chain_status.clone(),
             run_state: ngav.run_state.clone(),
             policy_applied: ngav.policy_applied.clone(),
-            processed_time: chrono::Utc::now(),
+            processed_time: Utc::now().format("%Y-%m-%d %H:%M:%S%.3f").to_string(),
             kafka_topic: "".to_string(),
             kafka_partition: 0,
             kafka_offset: 0,

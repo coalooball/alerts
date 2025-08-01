@@ -166,11 +166,17 @@ impl ConsumerService {
             loop {
                 match consumer.recv().await {
                     Ok(message) => {
-                        let payload = match message.payload_view::<str>() {
-                            Some(Ok(payload)) => payload.to_string(),
-                            Some(Err(e)) => {
-                                error!("Error deserializing message payload: {}", e);
-                                continue;
+                        let payload = match message.payload() {
+                            Some(bytes) => {
+                                match String::from_utf8_lossy(bytes).into_owned() {
+                                    payload => {
+                                        // Check if the conversion resulted in replacement characters
+                                        if payload.contains('\u{FFFD}') {
+                                            warn!("Message payload contains invalid UTF-8 characters, using lossy conversion");
+                                        }
+                                        payload
+                                    }
+                                }
                             }
                             None => {
                                 warn!("Empty message payload");

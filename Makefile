@@ -103,14 +103,20 @@ create-db:
 	psql -U postgres -h 10.26.64.224 -c "CREATE DATABASE alert_server;" || echo "Database may already exist"
 
 init-db: build-backend
-	@echo "🔄 Initializing database (drop and recreate)..."
+	@echo "🔄 Initializing database and ClickHouse tables (drop and recreate)..."
+	@echo "📄 This will:"
+	@echo "  - Drop and recreate PostgreSQL 'alert_server' database"
+	@echo "  - Drop and recreate all ClickHouse tables in 'alerts' database"
 	cargo run --bin web-server -- --init
-	@echo "✅ Database initialization completed"
+	@echo "✅ Database and ClickHouse initialization completed"
 
 init-db-dev: dev-backend
-	@echo "🔄 Initializing database (drop and recreate, dev build)..."
+	@echo "🔄 Initializing database and ClickHouse tables (drop and recreate, dev build)..."
+	@echo "📄 This will:"
+	@echo "  - Drop and recreate PostgreSQL 'alert_server' database"
+	@echo "  - Drop and recreate all ClickHouse tables in 'alerts' database"
 	cargo run --bin web-server -- --init
-	@echo "✅ Database initialization completed"
+	@echo "✅ Database and ClickHouse initialization completed"
 
 # Quick development workflow
 quick: dev-backend build-frontend start-dev
@@ -144,8 +150,8 @@ help:
 	@echo "Database:"
 	@echo "  setup-db     - Setup PostgreSQL database (info only)"
 	@echo "  create-db    - Create alert_server database"
-	@echo "  init-db      - Initialize database (drop & recreate, release build)"
-	@echo "  init-db-dev  - Initialize database (drop & recreate, dev build)"
+	@echo "  init-db      - Initialize PostgreSQL & ClickHouse (drop & recreate, release build)"
+	@echo "  init-db-dev  - Initialize PostgreSQL & ClickHouse (drop & recreate, dev build)"
 	@echo ""
 	@echo "Cleanup:"
 	@echo "  clean        - Clean all build artifacts"

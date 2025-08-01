@@ -98,7 +98,7 @@ CREATE TABLE IF NOT EXISTS ngav_alerts (
     target_value String,
     workflow_state String,
     workflow_remediation String,
-    workflow_last_update_time String,
+    workflow_last_update_time DateTime64(3),
     workflow_comment String,
     workflow_changed_by String,
     device_internal_ip String,
