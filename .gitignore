@@ -4,3 +4,4 @@ atlasv2
 # Frontend build artifacts
 frontend/dist/
 frontend/node_modules/
+*.log

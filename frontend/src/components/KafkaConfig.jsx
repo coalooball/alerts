@@ -105,6 +105,46 @@ const KafkaConfig = ({
                 className="input"
               />
             </div>
+
+            <div className="form-row">
+              <label>偏移量重置策略：</label>
+              <select
+                value={newConfig.auto_offset_reset}
+                onChange={(e) => setNewConfig({...newConfig, auto_offset_reset: e.target.value})}
+                className="input"
+              >
+                <option value="earliest">earliest - 从最早的消息开始</option>
+                <option value="latest">latest - 从最新的消息开始</option>
+                <option value="none">none - 如果没有偏移量则抛出异常</option>
+              </select>
+            </div>
+
+            <div className="form-row">
+              <label>自动提交偏移量：</label>
+              <div className="checkbox-wrapper">
+                <input
+                  type="checkbox"
+                  id="enable_auto_commit"
+                  checked={newConfig.enable_auto_commit}
+                  onChange={(e) => setNewConfig({...newConfig, enable_auto_commit: e.target.checked})}
+                />
+                <label htmlFor="enable_auto_commit" className="checkbox-label">
+                  {newConfig.enable_auto_commit ? '已启用' : '已禁用'}
+                </label>
+              </div>
+            </div>
+
+            {newConfig.enable_auto_commit && (
+              <div className="form-row">
+                <label>自动提交间隔（毫秒）：</label>
+                <input
+                  type="number"
+                  value={newConfig.auto_commit_interval_ms}
+                  onChange={(e) => setNewConfig({...newConfig, auto_commit_interval_ms: parseInt(e.target.value)})}
+                  className="input"
+                />
+              </div>
+            )}
           </div>
           
           <button onClick={saveConfig} className="btn btn-primary">
@@ -133,6 +173,11 @@ const KafkaConfig = ({
                   <p><strong>服务器：</strong> {cfg.bootstrap_servers}</p>
                   <p><strong>主题：</strong> {cfg.topic}</p>
                   <p><strong>消费者组：</strong> {cfg.group_id}</p>
+                  <p><strong>偏移量重置：</strong> {cfg.auto_offset_reset}</p>
+                  <p><strong>自动提交：</strong> {cfg.enable_auto_commit ? '已启用' : '已禁用'}</p>
+                  {cfg.enable_auto_commit && (
+                    <p><strong>提交间隔：</strong> {cfg.auto_commit_interval_ms}ms</p>
+                  )}
                   <p><strong>创建时间：</strong> {new Date(cfg.created_at).toLocaleDateString()}</p>
                 </div>
 

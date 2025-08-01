@@ -1,7 +1,7 @@
 [kafka]
 bootstrap_servers = "10.26.64.224:9093"
-topic = "alerts"
-group_id = "alerts-consumer-group"
+topic = "alerts-edr"
+group_id = "1"
 
 # 生产者配置
 [kafka.producer]

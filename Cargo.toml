@@ -7,6 +7,11 @@ edition = "2024"
 name = "kafka-sender"
 path = "src/bin/kafka_sender.rs"
 
+
+[[bin]]
+name = "kafka-consumer"
+path = "src/bin/kafka_consumer.rs"
+
 [[bin]]
 name = "web-server"
 path = "src/bin/web_server.rs"

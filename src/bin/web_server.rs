@@ -657,9 +657,23 @@ async fn toggle_config(
         Ok(_) => {
             let action = if request.is_active { "activated" } else { "deactivated" };
             info!("✅ Configuration {} successfully: {}", action, id);
+            
+            // Refresh consumer service when Kafka config is toggled
+            if let Some(consumer_service) = &state.consumer_service {
+                info!("🔄 Refreshing consumer service after config toggle...");
+                if let Err(e) = consumer_service.refresh_consumers().await {
+                    error!("❌ Failed to refresh consumer service: {}", e);
+                    return Ok(ResponseJson(serde_json::json!({
+                        "success": false,
+                        "message": format!("Configuration {} but failed to refresh consumers: {}", action, e)
+                    })));
+                }
+                info!("✅ Consumer service refreshed successfully");
+            }
+            
             Ok(ResponseJson(serde_json::json!({
                 "success": true,
-                "message": format!("Configuration {} successfully", action)
+                "message": format!("Configuration {} and consumers refreshed successfully", action)
             })))
         }
         Err(e) => {
@@ -692,9 +706,23 @@ async fn activate_config(
     match state.database.set_active_kafka_config(config_id).await {
         Ok(_) => {
             info!("✅ Configuration activated successfully (single active): {}", id);
+            
+            // Refresh consumer service when a config is set as the only active one
+            if let Some(consumer_service) = &state.consumer_service {
+                info!("🔄 Refreshing consumer service after setting active config...");
+                if let Err(e) = consumer_service.refresh_consumers().await {
+                    error!("❌ Failed to refresh consumer service: {}", e);
+                    return Ok(ResponseJson(serde_json::json!({
+                        "success": false,
+                        "message": format!("Configuration activated but failed to refresh consumers: {}", e)
+                    })));
+                }
+                info!("✅ Consumer service refreshed successfully");
+            }
+            
             Ok(ResponseJson(serde_json::json!({
                 "success": true,
-                "message": "Configuration activated successfully (all others deactivated)"
+                "message": "Configuration activated and consumers refreshed successfully (all others deactivated)"
             })))
         }
         Err(e) => {
@@ -1024,9 +1052,25 @@ async fn save_data_source_config(
     match state.database.save_data_source_config(&request.data_type, &kafka_config_ids).await {
         Ok(()) => {
             info!("✅ Data source configuration saved successfully for type: {}", request.data_type);
+            
+            // Refresh consumer service to pick up new data source mappings
+            if let Some(consumer_service) = &state.consumer_service {
+                info!("🔄 Refreshing consumer service to apply new data source mappings...");
+                if let Err(e) = consumer_service.refresh_consumers().await {
+                    error!("❌ Failed to refresh consumer service: {}", e);
+                    let response = DataSourceConfigResponse {
+                        success: false,
+                        message: format!("Configuration saved but failed to refresh consumers: {}", e),
+                        configs: None,
+                    };
+                    return Ok(ResponseJson(response));
+                }
+                info!("✅ Consumer service refreshed successfully");
+            }
+            
             let response = DataSourceConfigResponse {
                 success: true,
-                message: "Data source configuration saved successfully".to_string(),
+                message: "Data source configuration saved and consumers refreshed successfully".to_string(),
                 configs: None,
             };
             Ok(ResponseJson(response))

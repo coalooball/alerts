@@ -42,10 +42,38 @@ INSERT INTO kafka_configs (
     auto_commit_interval_ms,
     is_active
 ) VALUES (
-    'default',
+    'edr',
     '10.26.64.224:9093',
-    'alerts',
-    'alerts-consumer-group',
+    'alerts-edr',
+    '1',
+    5000,
+    5000,
+    100,
+    3,
+    'earliest',
+    true,
+    1000,
+    true
+) ON CONFLICT (name) DO NOTHING;
+
+INSERT INTO kafka_configs (
+    name,
+    bootstrap_servers,
+    topic,
+    group_id,
+    message_timeout_ms,
+    request_timeout_ms,
+    retry_backoff_ms,
+    retries,
+    auto_offset_reset,
+    enable_auto_commit,
+    auto_commit_interval_ms,
+    is_active
+) VALUES (
+    'ngav',
+    '10.26.64.224:9093',
+    'alerts-ngav',
+    '2',
     5000,
     5000,
     100,
@@ -176,9 +204,9 @@ CREATE TRIGGER update_data_source_configs_updated_at
 
 -- Insert default data source configurations
 INSERT INTO data_source_configs (data_type, kafka_config_id) 
-SELECT 'edr', id FROM kafka_configs WHERE name = 'default'
+SELECT 'edr', id FROM kafka_configs WHERE name = 'edr'
 ON CONFLICT (data_type, kafka_config_id) DO NOTHING;
 
 INSERT INTO data_source_configs (data_type, kafka_config_id) 
-SELECT 'ngav', id FROM kafka_configs WHERE name = 'development'
+SELECT 'ngav', id FROM kafka_configs WHERE name = 'ngav'
 ON CONFLICT (data_type, kafka_config_id) DO NOTHING;

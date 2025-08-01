@@ -2,6 +2,7 @@ use anyhow::Result;
 use clap::Parser;
 use log::{info, warn, error};
 use std::path::PathBuf;
+use std::time::Duration;
 use rdkafka::{
     config::{ClientConfig, FromClientConfig},
     consumer::{Consumer, StreamConsumer},
@@ -97,7 +98,13 @@ async fn main() -> Result<()> {
         .set("group.id", &config.group_id)
         .set("auto.offset.reset", &args.offset_reset)
         .set("enable.auto.commit", "true")
-        .set("auto.commit.interval.ms", "1000");
+        .set("auto.commit.interval.ms", "1000")
+        .set("session.timeout.ms", "6000")
+        .set("enable.partition.eof", "true");
+
+    if args.verbose {
+        consumer_config.set("debug", "consumer,topic,msg");
+    }
 
     // Create consumer
     let consumer: StreamConsumer = StreamConsumer::from_config(&consumer_config)?;
@@ -105,6 +112,21 @@ async fn main() -> Result<()> {
 
     info!("✅ Kafka consumer created and subscribed to topic: {}", config.topic);
     info!("📥 Starting to consume messages...");
+    
+    // Get partition metadata
+    let metadata = consumer.fetch_metadata(Some(&config.topic), Duration::from_secs(5))?;
+    for topic in metadata.topics() {
+        if topic.name() == config.topic {
+            info!("📊 Topic '{}' has {} partitions", topic.name(), topic.partitions().len());
+            for partition in topic.partitions() {
+                info!("  └─ Partition {}: leader={}, replicas={}, ISR={}", 
+                    partition.id(), 
+                    partition.leader(), 
+                    partition.replicas().len(),
+                    partition.isr().len());
+            }
+        }
+    }
 
     let mut count = 0;
 
@@ -141,6 +163,11 @@ async fn main() -> Result<()> {
                 // Process message payload
                 match msg.payload_view::<str>() {
                     Some(Ok(payload)) => {
+                        // Always show message number at the beginning
+                        if !args.metadata {
+                            println!("━━━ Message #{} ━━━", count);
+                        }
+                        
                         if args.pretty {
                             // Try to parse as JSON and pretty print
                             match serde_json::from_str::<serde_json::Value>(payload) {
@@ -181,12 +208,20 @@ async fn main() -> Result<()> {
                 }
             }
             Err(e) => {
-                error!("❌ Error receiving message: {}", e);
-                if e.to_string().contains("timed out") {
+                if e.to_string().contains("Partition EOF") {
+                    // EOF is normal when we've consumed all messages
+                    if args.verbose {
+                        info!("📭 Reached end of partition (no new messages)");
+                    }
+                    // Continue waiting for new messages
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    continue;
+                } else if e.to_string().contains("timed out") {
                     // Timeout is normal, continue consuming
                     continue;
                 } else {
                     // Other errors might be more serious
+                    error!("❌ Error receiving message: {}", e);
                     error!("💥 Consumer error, stopping: {}", e);
                     break;
                 }

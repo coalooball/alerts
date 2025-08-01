@@ -2,7 +2,7 @@ use anyhow::Result;
 use log::{error, info};
 use rdkafka::{
     config::{ClientConfig, FromClientConfig},
-    producer::{FutureProducer, FutureRecord},
+    producer::{FutureProducer, FutureRecord, Producer},
 };
 use std::fs::File;
 use std::io::{BufRead, BufReader};
@@ -20,6 +20,22 @@ pub struct KafkaProducer {
 }
 
 impl KafkaProducer {
+    /// Flush all pending messages
+    pub fn flush(&self, timeout: Duration) -> Result<()> {
+        info!("Flushing producer with timeout: {:?}", timeout);
+        let result = self.producer.flush(timeout);
+        match result {
+            Ok(()) => {
+                info!("✅ Producer flushed successfully");
+                Ok(())
+            }
+            Err(e) => {
+                error!("❌ Failed to flush producer: {:?}", e);
+                Err(anyhow::anyhow!("Failed to flush producer: {:?}", e))
+            }
+        }
+    }
+
     /// Safely read a file that may contain invalid UTF-8
     #[allow(dead_code)]
     fn read_file_lossy(file_path: &str) -> Result<Vec<String>> {

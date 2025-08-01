@@ -87,6 +87,20 @@ async fn main() -> Result<()> {
 
     // Open data file
     let file = File::open(&args.data).await?;
+    info!("📂 Opened file: {:?}", args.data);
+    
+    // Count total lines first
+    let file_for_count = File::open(&args.data).await?;
+    let reader_for_count = BufReader::new(file_for_count);
+    let mut lines_for_count = reader_for_count.lines();
+    let mut total_lines = 0;
+    while let Some(line) = lines_for_count.next_line().await? {
+        if !line.trim().is_empty() {
+            total_lines += 1;
+        }
+    }
+    info!("📄 Total non-empty lines in file: {}", total_lines);
+    
     let reader = BufReader::new(file);
     let mut lines = reader.lines();
 
@@ -102,9 +116,14 @@ async fn main() -> Result<()> {
     let mut count = 0;
     let mut success_count = 0;
     let mut error_count = 0;
+    let mut line_number = 0;
 
     while let Some(line) = lines.next_line().await? {
+        line_number += 1;
         if line.trim().is_empty() {
+            if args.verbose {
+                info!("⏭️  Skipping empty line #{}", line_number);
+            }
             continue;
         }
 
@@ -127,14 +146,17 @@ async fn main() -> Result<()> {
             Ok(_) => {
                 success_count += 1;
                 if args.verbose {
-                    info!("✅ Sent message #{}", count);
+                    info!("✅ Sent message #{} (line #{})", count, line_number);
                 } else if count % 100 == 0 {
                     info!("📊 Sent {} messages ({} success, {} errors)", count, success_count, error_count);
                 }
             }
             Err(e) => {
                 error_count += 1;
-                error!("❌ Failed to send message #{}: {}", count, e);
+                error!("❌ Failed to send message #{} (line #{}): {}", count, line_number, e);
+                if args.verbose {
+                    error!("📝 Failed line content: {}", line.chars().take(200).collect::<String>());
+                }
             }
         }
 
@@ -146,6 +168,11 @@ async fn main() -> Result<()> {
 
     info!("🎉 Completed sending messages");
     info!("📊 Final stats: {} total, {} success, {} errors", count, success_count, error_count);
+    
+    // Flush any pending messages
+    info!("⏳ Flushing producer to ensure all messages are sent...");
+    producer.flush(Duration::from_secs(10))?;
+    info!("✅ All messages have been flushed to Kafka");
 
     Ok(())
 }
