@@ -582,6 +582,14 @@ impl ClickHouseConnection {
         Ok(alerts)
     }
 
+    pub async fn get_alerts_count(&self) -> Result<u64> {
+        let query = "SELECT count(*) as count FROM alerts.common_alerts";
+        
+        let count: u64 = self.client.query(query).fetch_one().await?;
+        
+        Ok(count)
+    }
+
     pub async fn get_common_alert_by_id(&self, id: &str) -> Result<Option<CommonAlert>> {
         let query = "SELECT * FROM alerts.common_alerts WHERE id = ?";
         
@@ -646,6 +654,70 @@ impl ClickHouseConnection {
         }
 
         Ok(serde_json::Value::Object(result))
+    }
+
+    pub async fn get_alert_stats(&self, minutes: u32) -> Result<(f64, u64, std::collections::HashMap<String, u64>, std::collections::HashMap<String, u64>)> {
+        use std::collections::HashMap;
+        
+        // Get total message count
+        let total_query = "SELECT count(*) as total FROM alerts.common_alerts";
+        let total: u64 = self.client.query(total_query).fetch_one().await?;
+        
+        // Get message rate (messages per second in the last N minutes)
+        let rate_query = format!(r#"
+            SELECT count(*) as count
+            FROM alerts.common_alerts
+            WHERE parseDateTimeBestEffort(processed_time) >= now() - INTERVAL {} MINUTE
+        "#, minutes);
+        
+        let recent_count: u64 = self.client.query(&rate_query).fetch_one().await?;
+        let message_rate = recent_count as f64 / (minutes as f64 * 60.0);
+        
+        // Get type breakdown
+        let type_query = r#"
+            SELECT data_type, count(*) as count
+            FROM alerts.common_alerts
+            GROUP BY data_type
+        "#;
+        
+        #[derive(Debug, Row, Deserialize)]
+        struct TypeCount {
+            data_type: String,
+            count: u64,
+        }
+        
+        let type_rows: Vec<TypeCount> = self.client.query(type_query).fetch_all().await?;
+        let mut type_breakdown = HashMap::new();
+        for row in type_rows {
+            type_breakdown.insert(row.data_type, row.count);
+        }
+        
+        // Get severity breakdown  
+        let severity_query = r#"
+            SELECT 
+                CASE 
+                    WHEN severity >= 8 THEN 'critical'
+                    WHEN severity >= 5 THEN 'warning'
+                    ELSE 'info'
+                END as severity_level,
+                count(*) as count
+            FROM alerts.common_alerts
+            GROUP BY severity_level
+        "#;
+        
+        #[derive(Debug, Row, Deserialize)]
+        struct SeverityCount {
+            severity_level: String,
+            count: u64,
+        }
+        
+        let severity_rows: Vec<SeverityCount> = self.client.query(severity_query).fetch_all().await?;
+        let mut severity_breakdown = HashMap::new();
+        for row in severity_rows {
+            severity_breakdown.insert(row.severity_level, row.count);
+        }
+        
+        Ok((message_rate, total, type_breakdown, severity_breakdown))
     }
 }
 

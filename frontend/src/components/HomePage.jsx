@@ -1,21 +1,10 @@
 import React from 'react';
+import KafkaDataChart from './KafkaDataChart';
 
 const HomePage = ({ activeConfigs, configs, showTooltip, hideTooltip }) => {
   return (
     <div className="home-content">
-      <div className="status-overview">
-        <div className="status-card">
-          <h3>当前活跃配置</h3>
-          <div className="status-number">{activeConfigs.length}</div>
-          <p>个Kafka配置正在运行</p>
-        </div>
-        
-        <div className="status-card">
-          <h3>总配置数量</h3>
-          <div className="status-number">{configs.length}</div>
-          <p>个Kafka配置已创建</p>
-        </div>
-      </div>
+      <KafkaDataChart />
 
       {activeConfigs.length > 0 && (
         <div className="active-configs-section">

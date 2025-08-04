@@ -8,6 +8,7 @@ const AlertData = () => {
   const [showDetail, setShowDetail] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [alertsPerPage] = useState(20);
+  const [totalAlerts, setTotalAlerts] = useState(0);
   const [refreshInterval, setRefreshInterval] = useState(() => {
     // Load saved refresh interval from localStorage
     const saved = localStorage.getItem('alertRefreshInterval');
@@ -50,13 +51,16 @@ const AlertData = () => {
       
       if (data.success) {
         setAlerts(data.alerts);
+        setTotalAlerts(data.total || 0);
       } else {
         console.error('Failed to fetch alerts');
         setAlerts([]);
+        setTotalAlerts(0);
       }
     } catch (error) {
       console.error('Error fetching alerts:', error);
       setAlerts([]);
+      setTotalAlerts(0);
     } finally {
       setLoading(false);
     }
@@ -255,7 +259,7 @@ const AlertData = () => {
   return (
     <div className="alert-data-container">
       <div className="alert-data-header">
-        <h2>告警数据</h2>
+        <h2>告警数据 <span className="total-alerts-count">(总数: {totalAlerts.toLocaleString('zh-CN')})</span></h2>
         <div className="header-controls">
           <select 
             className="refresh-interval-select"

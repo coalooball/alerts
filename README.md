@@ -116,7 +116,7 @@ kafka-sender [OPTIONS] --bootstrap-servers <SERVERS> --topic <TOPIC> --group-id 
 ./target/debug/kafka-sender \
   --bootstrap-servers 10.26.64.224:9093 \
   --topic alerts-ngav \
-  --group-id debug-group \
+  --group-id 2 \
   --data fixtures/ngav-alerts-test-10k.jsonl \
   --data-type ngav \
   --rate 1 \

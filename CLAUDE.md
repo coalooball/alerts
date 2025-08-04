@@ -118,12 +118,13 @@ Standalone tool for consuming and displaying Kafka messages:
 
 ### web-server Binary
 Axum-based web server with React frontend for comprehensive alert management:
-- Serves React frontend on http://localhost:3000
+- Serves React frontend on http://localhost:3000 (default)
 - API endpoints for Kafka/ClickHouse connectivity testing
 - Configuration management through database-backed web UI
 - Real-time message consumption with ClickHouse storage
 - Background consumer service for automated alert processing
 - `--init` flag for database initialization (drops and recreates schema)
+- `-p, --port <PORT>` - Specify port to listen on (default: 3000)
 
 ## Web API Endpoints
 

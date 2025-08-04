@@ -144,6 +144,15 @@ struct KafkaMessage {
 }
 
 #[derive(Serialize)]
+struct KafkaStatsResponse {
+    success: bool,
+    message_rate: f64,
+    total_messages: u64,
+    type_breakdown: std::collections::HashMap<String, u64>,
+    severity_breakdown: std::collections::HashMap<String, u64>,
+}
+
+#[derive(Serialize)]
 struct AlertsResponse {
     success: bool,
     alerts: Vec<serde_json::Value>,
@@ -186,9 +195,19 @@ async fn main() -> Result<()> {
                 .action(clap::ArgAction::SetTrue)
                 .help("Initialize database (drop and recreate if exists)")
         )
+        .arg(
+            Arg::new("port")
+                .short('p')
+                .long("port")
+                .value_name("PORT")
+                .help("Port to listen on")
+                .default_value("3000")
+                .value_parser(clap::value_parser!(u16))
+        )
         .get_matches();
 
     let init_db = matches.get_flag("init");
+    let port = *matches.get_one::<u16>("port").unwrap();
 
     if init_db {
         info!("🔄 Database initialization mode enabled");
@@ -359,6 +378,7 @@ async fn main() -> Result<()> {
         .route("/api/alerts/:id", get(get_alert_detail))
         .route("/api/consumer-status", get(get_consumer_status))
         .route("/api/live-messages", get(get_live_messages))
+        .route("/api/kafka-stats", get(get_kafka_stats))
         .nest_service("/", ServeDir::new("./frontend/dist"))
         .layer(
             ServiceBuilder::new()
@@ -366,8 +386,9 @@ async fn main() -> Result<()> {
         )
         .with_state(Arc::new(state));
 
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;
-    info!("🌐 Web server running on http://localhost:3000");
+    let bind_addr = format!("0.0.0.0:{}", port);
+    let listener = tokio::net::TcpListener::bind(&bind_addr).await?;
+    info!("🌐 Web server running on http://localhost:{}", port);
     
     axum::serve(listener, app).await?;
 
@@ -1103,7 +1124,14 @@ async fn get_alerts(
                         .map(|alert| serde_json::to_value(alert).unwrap_or_default())
                         .collect();
                     
-                    let total = alerts_json.len() as u64;
+                    // Get total count from database
+                    let total = match ch.get_alerts_count().await {
+                        Ok(count) => count,
+                        Err(e) => {
+                            error!("Failed to get alerts count: {}", e);
+                            alerts_json.len() as u64
+                        }
+                    };
                     
                     Ok(ResponseJson(AlertsResponse {
                         success: true,
@@ -1260,4 +1288,36 @@ async fn get_live_messages(
             })))
         }
     }
+}
+
+async fn get_kafka_stats(
+    State(state): State<Arc<AppState>>,
+) -> Result<ResponseJson<KafkaStatsResponse>, StatusCode> {
+    use std::collections::HashMap;
+    
+    // Get recent messages from ClickHouse
+    let (message_rate, total_messages, type_breakdown, severity_breakdown) = match &state.clickhouse {
+        Some(ch) => {
+            // Get stats from last 5 minutes
+            match ch.get_alert_stats(5).await {
+                Ok(stats) => stats,
+                Err(e) => {
+                    error!("Failed to get alert stats: {}", e);
+                    (0.0, 0, HashMap::new(), HashMap::new())
+                }
+            }
+        }
+        None => {
+            // If no ClickHouse, return empty stats
+            (0.0, 0, HashMap::new(), HashMap::new())
+        }
+    };
+    
+    Ok(ResponseJson(KafkaStatsResponse {
+        success: true,
+        message_rate,
+        total_messages,
+        type_breakdown,
+        severity_breakdown,
+    }))
 }

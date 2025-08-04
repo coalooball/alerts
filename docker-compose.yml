@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  web-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: alerts-web-server
+    network_mode: "host"
+    command: ["-p", "3005"]
+    environment:
+      - RUST_LOG=info
+    # volumes:
+    #   - ./init.sql:/app/init.sql:ro
+    restart: unless-stopped
