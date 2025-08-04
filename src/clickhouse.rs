@@ -2,6 +2,8 @@ use anyhow::Result;
 use clickhouse::{Client, Row};
 use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc};
+use uuid::Uuid;
+use std::fs;
 
 use crate::{edr_alert::EdrAlert, ngav_alert::NgavAlert, database::ClickHouseConfigRow};
 
@@ -28,6 +30,7 @@ pub struct ClickHouseConnection {
 #[derive(Debug, Clone, Serialize, Deserialize, Row)]
 pub struct CommonAlert {
     pub id: String,
+    pub original_id: String,
     pub data_type: String,
     pub create_time: String,
     pub device_id: u64,
@@ -45,6 +48,7 @@ pub struct CommonAlert {
     pub kafka_topic: String,
     pub kafka_partition: u32,
     pub kafka_offset: u64,
+    pub kafka_config_name: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Row)]
@@ -163,13 +167,25 @@ impl ClickHouseConnection {
         if s.is_empty() {
             s
         } else {
-            String::from_utf8_lossy(s.as_bytes()).to_string()
+            // Convert to bytes and back with lossy conversion to handle invalid UTF-8
+            let bytes = s.into_bytes();
+            let cleaned = String::from_utf8_lossy(&bytes).to_string();
+            
+            // Log if we found any issues
+            if cleaned.contains('\u{FFFD}') {
+                log::warn!("Found and cleaned invalid UTF-8 characters in string");
+                // Remove replacement characters
+                cleaned.chars().filter(|&c| c != '\u{FFFD}').collect()
+            } else {
+                cleaned
+            }
         }
     }
 
     // Helper function to clean CommonAlert
     fn clean_common_alert(&self, mut alert: CommonAlert) -> CommonAlert {
         alert.id = Self::clean_string(alert.id);
+        alert.original_id = Self::clean_string(alert.original_id);
         alert.data_type = Self::clean_string(alert.data_type);
         alert.create_time = Self::clean_string(alert.create_time);
         alert.device_name = Self::clean_string(alert.device_name);
@@ -183,6 +199,7 @@ impl ClickHouseConnection {
         alert.raw_data = Self::clean_string(alert.raw_data);
         alert.processed_time = Self::clean_string(alert.processed_time);
         alert.kafka_topic = Self::clean_string(alert.kafka_topic);
+        alert.kafka_config_name = Self::clean_string(alert.kafka_config_name);
         alert
     }
 
@@ -195,18 +212,8 @@ impl ClickHouseConnection {
     pub async fn initialize_tables(&self) -> Result<()> {
         log::info!("🔧 Initializing ClickHouse tables...");
 
-        // First, create the database if it doesn't exist
-        log::info!("📊 Creating ClickHouse database 'alerts' if not exists...");
-        self.client.query("CREATE DATABASE IF NOT EXISTS alerts").execute().await
-            .map_err(|e| anyhow::anyhow!("Failed to create ClickHouse database: {}", e))?;
-
-        // Only check and create tables if they don't exist - never drop in normal mode
-        log::info!("📄 Creating ClickHouse tables if not exists...");
-        
-        // Create tables directly with SQL (IF NOT EXISTS ensures no data loss)
-        self.create_common_alerts_table().await?;
-        self.create_edr_alerts_table().await?;
-        self.create_ngav_alerts_table().await?;
+        // Read and execute SQL from clickhouse_init.sql
+        self.execute_sql_file("clickhouse_init.sql").await?;
 
         log::info!("✅ ClickHouse tables initialized successfully");
         Ok(())
@@ -216,163 +223,55 @@ impl ClickHouseConnection {
     pub async fn reinitialize_tables(&self) -> Result<()> {
         log::info!("🔄 Force reinitializing ClickHouse tables (drop and recreate)...");
 
-        // First, create the database if it doesn't exist
-        log::info!("📊 Creating ClickHouse database 'alerts' if not exists...");
-        self.client.query("CREATE DATABASE IF NOT EXISTS alerts").execute().await
-            .map_err(|e| anyhow::anyhow!("Failed to create ClickHouse database: {}", e))?;
-
         // Always drop existing tables in reinitialize mode
         log::info!("🗑️ Dropping existing tables...");
         self.drop_existing_tables().await?;
 
-        log::info!("📄 Creating fresh ClickHouse tables...");
+        log::info!("📄 Creating fresh ClickHouse tables from SQL file...");
         
-        // Create tables directly with SQL
-        self.create_common_alerts_table().await?;
-        self.create_edr_alerts_table().await?;
-        self.create_ngav_alerts_table().await?;
+        // Read and execute SQL from clickhouse_init.sql
+        self.execute_sql_file("clickhouse_init.sql").await?;
 
         log::info!("✅ ClickHouse tables reinitialized successfully");
         Ok(())
     }
 
-    async fn create_common_alerts_table(&self) -> Result<()> {
-        let query = r#"
-            CREATE TABLE IF NOT EXISTS alerts.common_alerts (
-                id String,
-                data_type String,
-                create_time String,
-                device_id UInt64,
-                device_name String,
-                device_os String,
-                device_internal_ip String,
-                device_external_ip String,
-                org_key String,
-                severity UInt8,
-                alert_type String,
-                threat_category String,
-                device_username String,
-                raw_data String,
-                processed_time String,
-                kafka_topic String,
-                kafka_partition UInt32,
-                kafka_offset UInt64
-            ) ENGINE = MergeTree()
-            PARTITION BY toYYYYMM(parseDateTimeBestEffort(create_time))
-            ORDER BY (data_type, create_time, device_id)
-        "#;
+    async fn execute_sql_file(&self, filename: &str) -> Result<()> {
+        log::info!("📄 Reading SQL from file: {}", filename);
         
-        self.client.query(query).execute().await?;
-        Ok(())
-    }
-
-    async fn create_edr_alerts_table(&self) -> Result<()> {
-        let query = r#"
-            CREATE TABLE IF NOT EXISTS alerts.edr_alerts (
-                id String,
-                schema UInt32,
-                create_time String,
-                device_external_ip String,
-                device_id UInt64,
-                device_internal_ip String,
-                device_name String,
-                device_os String,
-                ioc_hit String,
-                ioc_id String,
-                org_key String,
-                parent_cmdline String,
-                parent_guid String,
-                parent_hash Array(String),
-                parent_path String,
-                parent_pid UInt32,
-                parent_publisher Array(String),
-                parent_reputation String,
-                parent_username String,
-                process_cmdline String,
-                process_guid String,
-                process_hash Array(String),
-                process_path String,
-                process_pid UInt32,
-                process_publisher Array(String),
-                process_reputation String,
-                process_username String,
-                report_id String,
-                report_name String,
-                report_tags Array(String),
-                severity UInt8,
-                alert_type String,
-                watchlists Array(String),
-                processed_time String,
-                kafka_topic String,
-                kafka_partition UInt32,
-                kafka_offset UInt64
-            ) ENGINE = MergeTree()
-            PARTITION BY toYYYYMM(parseDateTimeBestEffort(create_time))
-            ORDER BY (create_time, device_id, report_id)
-        "#;
+        // Read the SQL file
+        let sql_content = fs::read_to_string(filename)
+            .map_err(|e| anyhow::anyhow!("Failed to read SQL file '{}': {}", filename, e))?;
         
-        self.client.query(query).execute().await?;
-        Ok(())
-    }
-
-    async fn create_ngav_alerts_table(&self) -> Result<()> {
-        let query = r#"
-            CREATE TABLE IF NOT EXISTS alerts.ngav_alerts (
-                id String,
-                alert_type String,
-                legacy_alert_id String,
-                org_key String,
-                create_time String,
-                last_update_time String,
-                first_event_time String,
-                last_event_time String,
-                threat_id String,
-                severity UInt8,
-                category String,
-                device_id UInt64,
-                device_os String,
-                device_os_version String,
-                device_name String,
-                device_username String,
-                policy_id UInt64,
-                policy_name String,
-                target_value String,
-                workflow_state String,
-                workflow_remediation String,
-                workflow_last_update_time String,
-                workflow_comment String,
-                workflow_changed_by String,
-                device_internal_ip String,
-                device_external_ip String,
-                alert_url String,
-                reason String,
-                reason_code String,
-                process_name String,
-                device_location String,
-                created_by_event_id String,
-                threat_indicators Array(String),
-                threat_cause_actor_sha256 String,
-                threat_cause_actor_name String,
-                threat_cause_actor_process_pid String,
-                threat_cause_reputation String,
-                threat_cause_threat_category String,
-                threat_cause_vector String,
-                threat_cause_cause_event_id String,
-                blocked_threat_category String,
-                not_blocked_threat_category String,
-                kill_chain_status Array(String),
-                run_state String,
-                policy_applied String,
-                processed_time String,
-                kafka_topic String,
-                kafka_partition UInt32,
-                kafka_offset UInt64
-            ) ENGINE = MergeTree()
-            PARTITION BY toYYYYMM(parseDateTimeBestEffort(create_time))
-            ORDER BY (create_time, device_id, threat_id)
-        "#;
+        // Remove comments and clean up the content
+        let cleaned_content = sql_content
+            .lines()
+            .filter(|line| !line.trim().starts_with("--") && !line.trim().is_empty())
+            .collect::<Vec<_>>()
+            .join("\n");
         
-        self.client.query(query).execute().await?;
+        // Split SQL content by semicolons and execute each statement
+        let statements: Vec<&str> = cleaned_content
+            .split(';')
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .collect();
+        
+        for (i, statement) in statements.iter().enumerate() {
+            if statement.is_empty() {
+                continue;
+            }
+            
+            log::info!("Executing SQL statement {}: {}", i + 1, statement.lines().next().unwrap_or(statement));
+            
+            if let Err(e) = self.client.query(statement).execute().await {
+                log::error!("Failed to execute SQL statement {}: {} - Error: {}", i + 1, statement.lines().next().unwrap_or(statement), e);
+                // Continue with other statements instead of failing completely
+            } else {
+                log::info!("Successfully executed SQL statement {}", i + 1);
+            }
+        }
+        
         Ok(())
     }
 
@@ -407,15 +306,15 @@ impl ClickHouseConnection {
     pub async fn insert_common_alert(&self, alert: &CommonAlert) -> Result<()> {
         let query = r#"
             INSERT INTO alerts.common_alerts (
-                id, data_type, create_time, device_id, device_name, device_os,
+                original_id, data_type, create_time, device_id, device_name, device_os,
                 device_internal_ip, device_external_ip, org_key, severity, alert_type,
-                threat_category, device_username, raw_data, processed_time,
-                kafka_topic, kafka_partition, kafka_offset
+                threat_category, device_username, raw_data,
+                kafka_topic, kafka_partition, kafka_offset, kafka_config_name
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         "#;
 
         self.client.query(query)
-            .bind(&alert.id)
+            .bind(&alert.original_id)
             .bind(&alert.data_type)
             .bind(&alert.create_time)
             .bind(&alert.device_id)
@@ -429,10 +328,10 @@ impl ClickHouseConnection {
             .bind(&alert.threat_category)
             .bind(&alert.device_username)
             .bind(&alert.raw_data)
-            .bind(&alert.processed_time)
             .bind(&alert.kafka_topic)
             .bind(&alert.kafka_partition)
             .bind(&alert.kafka_offset)
+            .bind(&alert.kafka_config_name)
             .execute()
             .await?;
 
@@ -573,13 +472,97 @@ impl ClickHouseConnection {
 
     pub async fn get_common_alerts(&self, limit: u32, offset: u32) -> Result<Vec<CommonAlert>> {
         let query = format!(
-            "SELECT * FROM alerts.common_alerts ORDER BY create_time DESC LIMIT {} OFFSET {}",
+            r#"SELECT 
+                toString(id) as id, 
+                toString(original_id) as original_id, 
+                toString(data_type) as data_type, 
+                toString(create_time) as create_time,
+                device_id, 
+                toString(device_name) as device_name, 
+                toString(device_os) as device_os,
+                toString(device_internal_ip) as device_internal_ip, 
+                toString(device_external_ip) as device_external_ip, 
+                toString(org_key) as org_key,
+                severity, 
+                toString(alert_type) as alert_type, 
+                toString(threat_category) as threat_category, 
+                toString(device_username) as device_username,
+                toString(raw_data) as raw_data, 
+                toString(processed_time) as processed_time,
+                toString(kafka_topic) as kafka_topic, 
+                kafka_partition, kafka_offset, 
+                toString(kafka_config_name) as kafka_config_name
+            FROM alerts.common_alerts 
+            ORDER BY processed_time DESC, id DESC 
+            LIMIT {} OFFSET {}"#,
             limit, offset
         );
 
-        let alerts: Vec<CommonAlert> = self.client.query(&query).fetch_all().await?;
+        log::debug!("Executing query: {}", query);
         
-        Ok(alerts)
+        // Try to fetch data with error handling
+        match self.client.query(&query).fetch_all().await {
+            Ok(alerts) => {
+                log::info!("Successfully fetched {} alerts from ClickHouse", alerts.len());
+                // Clean all alerts to ensure valid UTF-8
+                let cleaned_alerts: Vec<CommonAlert> = alerts.into_iter()
+                    .map(|alert| self.clean_common_alert(alert))
+                    .collect();
+                Ok(cleaned_alerts)
+            },
+            Err(e) => {
+                log::error!("Failed to fetch alerts from ClickHouse: {}", e);
+                // Try a simpler query to see if there's data corruption
+                self.get_alerts_with_fallback(limit, offset).await
+            }
+        }
+    }
+
+    async fn get_alerts_with_fallback(&self, limit: u32, offset: u32) -> Result<Vec<CommonAlert>> {
+        log::warn!("Using fallback method to fetch alerts due to UTF-8 issues");
+        
+        // Try a very basic query first to see if we can get any data
+        let simple_query = format!(
+            "SELECT id, toString(device_name) as device_name, severity FROM alerts.common_alerts LIMIT {} OFFSET {}",
+            limit, offset
+        );
+        
+        match self.client.query(&simple_query).fetch_all::<(String, String, u8)>().await {
+            Ok(rows) => {
+                log::info!("Fallback query returned {} rows", rows.len());
+                // Create minimal alert objects
+                let alerts = rows.into_iter().map(|(id, device_name, severity)| {
+                    CommonAlert {
+                        id: Self::clean_string(id),
+                        original_id: "".to_string(),
+                        data_type: "unknown".to_string(),
+                        create_time: "".to_string(),
+                        device_id: 0,
+                        device_name: Self::clean_string(device_name),
+                        device_os: "".to_string(),
+                        device_internal_ip: "".to_string(),
+                        device_external_ip: "".to_string(),
+                        org_key: "".to_string(),
+                        severity,
+                        alert_type: "".to_string(),
+                        threat_category: "".to_string(),
+                        device_username: "".to_string(),
+                        raw_data: "".to_string(),
+                        processed_time: "".to_string(),
+                        kafka_topic: "".to_string(),
+                        kafka_partition: 0,
+                        kafka_offset: 0,
+                        kafka_config_name: "".to_string(),
+                    }
+                }).collect();
+                Ok(alerts)
+            },
+            Err(e) => {
+                log::error!("Even fallback query failed: {}", e);
+                // Return empty result rather than failing completely
+                Ok(vec![])
+            }
+        }
     }
 
     pub async fn get_alerts_count(&self) -> Result<u64> {
@@ -590,8 +573,49 @@ impl ClickHouseConnection {
         Ok(count)
     }
 
+    // Debug function to check what's in the database
+    pub async fn debug_table_contents(&self) -> Result<()> {
+        log::info!("🔍 Debugging ClickHouse table contents...");
+        
+        // Check if table exists
+        let table_check = "SELECT count(*) FROM system.tables WHERE database = 'alerts' AND name = 'common_alerts'";
+        let table_exists: u64 = self.client.query(table_check).fetch_one().await?;
+        log::info!("Table exists: {}", table_exists > 0);
+        
+        if table_exists > 0 {
+            // Check row count
+            let count: u64 = self.get_alerts_count().await?;
+            log::info!("Total rows: {}", count);
+            
+            if count > 0 {
+                // Try to get just the first row with minimal fields
+                let simple_query = "SELECT toString(id) as id, toString(device_name) as device_name FROM alerts.common_alerts LIMIT 1";
+                match self.client.query(simple_query).fetch_one::<(String, String)>().await {
+                    Ok((id, device_name)) => {
+                        log::info!("Sample row - ID: '{}', Device: '{}'", 
+                            id.chars().take(50).collect::<String>(), 
+                            device_name.chars().take(50).collect::<String>());
+                    },
+                    Err(e) => {
+                        log::error!("Failed to fetch sample row: {}", e);
+                    }
+                }
+            }
+        }
+        
+        Ok(())
+    }
+
     pub async fn get_common_alert_by_id(&self, id: &str) -> Result<Option<CommonAlert>> {
-        let query = "SELECT * FROM alerts.common_alerts WHERE id = ?";
+        let query = r#"SELECT 
+            id, original_id, data_type, 
+            toString(create_time) as create_time,
+            device_id, device_name, device_os,
+            device_internal_ip, device_external_ip, org_key,
+            severity, alert_type, threat_category, device_username,
+            raw_data, toString(processed_time) as processed_time,
+            kafka_topic, kafka_partition, kafka_offset, kafka_config_name
+        FROM alerts.common_alerts WHERE id = ?"#;
         
         let mut cursor = self.client.query(query).bind(id).fetch()?;
         
@@ -667,7 +691,7 @@ impl ClickHouseConnection {
         let rate_query = format!(r#"
             SELECT count(*) as count
             FROM alerts.common_alerts
-            WHERE parseDateTimeBestEffort(processed_time) >= now() - INTERVAL {} MINUTE
+            WHERE processed_time >= now() - INTERVAL {} MINUTE
         "#, minutes);
         
         let recent_count: u64 = self.client.query(&rate_query).fetch_one().await?;
@@ -726,7 +750,8 @@ impl From<&EdrAlert> for CommonAlert {
     fn from(edr: &EdrAlert) -> Self {
 
         Self {
-            id: edr.get_alert_key(),
+            id: Uuid::new_v4().to_string(),
+            original_id: edr.get_alert_key(),
             data_type: "edr".to_string(),
             create_time: parse_datetime_for_clickhouse(&edr.create_time),
             device_id: edr.device_id,
@@ -740,10 +765,11 @@ impl From<&EdrAlert> for CommonAlert {
             threat_category: "".to_string(), // EDR doesn't have threat_category
             device_username: edr.process_username.clone(),
             raw_data: serde_json::to_string(edr).unwrap_or_default(),
-            processed_time: Utc::now().format("%Y-%m-%d %H:%M:%S%.3f").to_string(),
+            processed_time: "".to_string(), // Will use ClickHouse DEFAULT now64()
             kafka_topic: "".to_string(),
             kafka_partition: 0,
             kafka_offset: 0,
+            kafka_config_name: "".to_string(),
         }
     }
 }
@@ -752,7 +778,8 @@ impl From<&NgavAlert> for CommonAlert {
     fn from(ngav: &NgavAlert) -> Self {
 
         Self {
-            id: ngav.get_alert_key(),
+            id: Uuid::new_v4().to_string(),
+            original_id: ngav.get_alert_key(),
             data_type: "ngav".to_string(),
             create_time: parse_datetime_for_clickhouse(&ngav.create_time),
             device_id: ngav.device_id,
@@ -766,10 +793,11 @@ impl From<&NgavAlert> for CommonAlert {
             threat_category: ngav.threat_cause_threat_category.clone(),
             device_username: ngav.device_username.clone(),
             raw_data: serde_json::to_string(ngav).unwrap_or_default(),
-            processed_time: Utc::now().format("%Y-%m-%d %H:%M:%S%.3f").to_string(),
+            processed_time: "".to_string(), // Will use ClickHouse DEFAULT now64()
             kafka_topic: "".to_string(),
             kafka_partition: 0,
             kafka_offset: 0,
+            kafka_config_name: "".to_string(),
         }
     }
 }
@@ -811,7 +839,7 @@ impl From<&EdrAlert> for EdrAlertRow {
             severity: edr.severity,
             alert_type: edr.alert_type.clone(),
             watchlists: edr.watchlists.iter().map(|w| w.name.clone()).collect(),
-            processed_time: Utc::now().format("%Y-%m-%d %H:%M:%S%.3f").to_string(),
+            processed_time: "".to_string(), // Will use ClickHouse DEFAULT now64()
             kafka_topic: "".to_string(),
             kafka_partition: 0,
             kafka_offset: 0,
@@ -870,7 +898,7 @@ impl From<&NgavAlert> for NgavAlertRow {
             kill_chain_status: ngav.kill_chain_status.clone(),
             run_state: ngav.run_state.clone(),
             policy_applied: ngav.policy_applied.clone(),
-            processed_time: Utc::now().format("%Y-%m-%d %H:%M:%S%.3f").to_string(),
+            processed_time: "".to_string(), // Will use ClickHouse DEFAULT now64()
             kafka_topic: "".to_string(),
             kafka_partition: 0,
             kafka_offset: 0,

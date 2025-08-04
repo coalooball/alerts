@@ -1117,11 +1117,26 @@ async fn get_alerts(
     
     match &state.clickhouse {
         Some(ch) => {
+            // Debug table contents if no data exists
+            if let Err(e) = ch.debug_table_contents().await {
+                error!("Failed to debug table contents: {}", e);
+            }
+            
             match ch.get_common_alerts(limit, offset).await {
                 Ok(alerts) => {
+                    info!("Successfully retrieved {} alerts from ClickHouse", alerts.len());
                     let alerts_json: Vec<serde_json::Value> = alerts
                         .into_iter()
-                        .map(|alert| serde_json::to_value(alert).unwrap_or_default())
+                        .enumerate()
+                        .filter_map(|(i, alert)| {
+                            match serde_json::to_value(alert) {
+                                Ok(value) => Some(value),
+                                Err(e) => {
+                                    error!("Failed to serialize alert {}: {}", i, e);
+                                    None
+                                }
+                            }
+                        })
                         .collect();
                     
                     // Get total count from database

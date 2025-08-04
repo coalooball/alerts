@@ -234,33 +234,29 @@ const AlertData = () => {
     );
   };
 
-  const renderPagination = () => {
-    return (
-      <div className="pagination">
-        <button 
-          onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
-          disabled={currentPage === 1}
-          className="pagination-button"
-        >
-          上一页
-        </button>
-        <span className="page-info">第 {currentPage} 页</span>
-        <button 
-          onClick={() => setCurrentPage(prev => prev + 1)}
-          disabled={alerts.length < alertsPerPage}
-          className="pagination-button"
-        >
-          下一页
-        </button>
-      </div>
-    );
-  };
 
   return (
     <div className="alert-data-container">
       <div className="alert-data-header">
         <h2>告警数据 <span className="total-alerts-count">(总数: {totalAlerts.toLocaleString('zh-CN')})</span></h2>
         <div className="header-controls">
+          <div className="pagination">
+            <button 
+              onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+              disabled={currentPage === 1}
+              className="pagination-button"
+            >
+              上一页
+            </button>
+            <span className="page-info">第 {currentPage} 页</span>
+            <button 
+              onClick={() => setCurrentPage(prev => prev + 1)}
+              disabled={alerts.length < alertsPerPage}
+              className="pagination-button"
+            >
+              下一页
+            </button>
+          </div>
           <select 
             className="refresh-interval-select"
             value={refreshInterval}
@@ -348,7 +344,6 @@ const AlertData = () => {
             </table>
           </div>
 
-          {alerts.length > 0 && renderPagination()}
         </>
       )}
 

@@ -7,8 +7,9 @@ CREATE DATABASE IF NOT EXISTS alerts;
 USE alerts;
 
 -- Common alerts table with shared fields from EDR and NGAV
-CREATE TABLE IF NOT EXISTS common_alerts (
-    id String,
+CREATE TABLE IF NOT EXISTS alerts.common_alerts (
+    id String DEFAULT generateUUIDv4(),
+    original_id String,
     data_type Enum8('edr' = 1, 'ngav' = 2, 'other' = 3),
     create_time DateTime64(3),
     device_id UInt64,
@@ -25,14 +26,15 @@ CREATE TABLE IF NOT EXISTS common_alerts (
     processed_time DateTime64(3) DEFAULT now64(),
     kafka_topic String,
     kafka_partition UInt32,
-    kafka_offset UInt64
+    kafka_offset UInt64,
+    kafka_config_name String
 ) ENGINE = MergeTree()
 PARTITION BY toYYYYMM(create_time)
-ORDER BY (data_type, create_time, device_id)
+ORDER BY (processed_time, id)
 TTL create_time + INTERVAL 365 DAY;
 
 -- EDR specific alerts table
-CREATE TABLE IF NOT EXISTS edr_alerts (
+CREATE TABLE IF NOT EXISTS alerts.edr_alerts (
     id String,
     schema UInt32,
     create_time DateTime64(3),
@@ -76,7 +78,7 @@ ORDER BY (create_time, device_id, report_id)
 TTL create_time + INTERVAL 365 DAY;
 
 -- NGAV specific alerts table
-CREATE TABLE IF NOT EXISTS ngav_alerts (
+CREATE TABLE IF NOT EXISTS alerts.ngav_alerts (
     id String,
     alert_type String,
     legacy_alert_id String,
@@ -133,18 +135,18 @@ TTL create_time + INTERVAL 365 DAY;
 
 -- Create indexes for better query performance
 -- Common alerts indexes
-CREATE INDEX IF NOT EXISTS idx_common_alerts_device_name ON common_alerts (device_name) TYPE bloom_filter(0.01);
-CREATE INDEX IF NOT EXISTS idx_common_alerts_severity ON common_alerts (severity) TYPE minmax;
-CREATE INDEX IF NOT EXISTS idx_common_alerts_data_type ON common_alerts (data_type) TYPE set(0);
+CREATE INDEX IF NOT EXISTS idx_common_alerts_device_name ON alerts.common_alerts (device_name) TYPE bloom_filter(0.01);
+CREATE INDEX IF NOT EXISTS idx_common_alerts_severity ON alerts.common_alerts (severity) TYPE minmax;
+CREATE INDEX IF NOT EXISTS idx_common_alerts_data_type ON alerts.common_alerts (data_type) TYPE set(0);
 
 -- EDR alerts indexes
-CREATE INDEX IF NOT EXISTS idx_edr_alerts_device_name ON edr_alerts (device_name) TYPE bloom_filter(0.01);
-CREATE INDEX IF NOT EXISTS idx_edr_alerts_severity ON edr_alerts (severity) TYPE minmax;
-CREATE INDEX IF NOT EXISTS idx_edr_alerts_report_name ON edr_alerts (report_name) TYPE bloom_filter(0.01);
-CREATE INDEX IF NOT EXISTS idx_edr_alerts_process_path ON edr_alerts (process_path) TYPE bloom_filter(0.01);
+CREATE INDEX IF NOT EXISTS idx_edr_alerts_device_name ON alerts.edr_alerts (device_name) TYPE bloom_filter(0.01);
+CREATE INDEX IF NOT EXISTS idx_edr_alerts_severity ON alerts.edr_alerts (severity) TYPE minmax;
+CREATE INDEX IF NOT EXISTS idx_edr_alerts_report_name ON alerts.edr_alerts (report_name) TYPE bloom_filter(0.01);
+CREATE INDEX IF NOT EXISTS idx_edr_alerts_process_path ON alerts.edr_alerts (process_path) TYPE bloom_filter(0.01);
 
 -- NGAV alerts indexes
-CREATE INDEX IF NOT EXISTS idx_ngav_alerts_device_name ON ngav_alerts (device_name) TYPE bloom_filter(0.01);
-CREATE INDEX IF NOT EXISTS idx_ngav_alerts_severity ON ngav_alerts (severity) TYPE minmax;
-CREATE INDEX IF NOT EXISTS idx_ngav_alerts_category ON ngav_alerts (category) TYPE bloom_filter(0.01);
-CREATE INDEX IF NOT EXISTS idx_ngav_alerts_threat_category ON ngav_alerts (threat_cause_threat_category) TYPE bloom_filter(0.01);
+CREATE INDEX IF NOT EXISTS idx_ngav_alerts_device_name ON alerts.ngav_alerts (device_name) TYPE bloom_filter(0.01);
+CREATE INDEX IF NOT EXISTS idx_ngav_alerts_severity ON alerts.ngav_alerts (severity) TYPE minmax;
+CREATE INDEX IF NOT EXISTS idx_ngav_alerts_category ON alerts.ngav_alerts (category) TYPE bloom_filter(0.01);
+CREATE INDEX IF NOT EXISTS idx_ngav_alerts_threat_category ON alerts.ngav_alerts (threat_cause_threat_category) TYPE bloom_filter(0.01);

@@ -154,6 +154,7 @@ impl ConsumerService {
 
         // Clone necessary data for the async task
         let config_id = config.id;
+        let config_name = config.name.clone();
         let topic = config.topic.clone();
         let clickhouse = Arc::clone(&self.clickhouse);
         let data_source_mapping = Arc::clone(&self.data_source_mapping);
@@ -203,6 +204,7 @@ impl ConsumerService {
                         if let Err(e) = Self::process_message(
                             &kafka_message,
                             Arc::clone(&clickhouse),
+                            &config_name,
                         ).await {
                             error!("Error processing message: {}", e);
                         }
@@ -231,6 +233,7 @@ impl ConsumerService {
     async fn process_message(
         kafka_message: &KafkaMessage,
         clickhouse: Arc<ClickHouseConnection>,
+        kafka_config_name: &str,
     ) -> Result<()> {
         debug!("Processing message from topic: {}", kafka_message.topic);
 
@@ -241,14 +244,14 @@ impl ConsumerService {
         match kafka_message.data_type.as_deref() {
             Some("edr") => {
                 if let Ok(edr_alert) = serde_json::from_value::<EdrAlert>(json_value) {
-                    Self::store_edr_alert(&edr_alert, kafka_message, &clickhouse).await?;
+                    Self::store_edr_alert(&edr_alert, kafka_message, &clickhouse, kafka_config_name).await?;
                 } else {
                     debug!("Message from EDR topic doesn't match EDR format, skipping");
                 }
             }
             Some("ngav") => {
                 if let Ok(ngav_alert) = serde_json::from_value::<NgavAlert>(json_value) {
-                    Self::store_ngav_alert(&ngav_alert, kafka_message, &clickhouse).await?;
+                    Self::store_ngav_alert(&ngav_alert, kafka_message, &clickhouse, kafka_config_name).await?;
                 } else {
                     debug!("Message from NGAV topic doesn't match NGAV format, skipping");
                 }
@@ -257,13 +260,13 @@ impl ConsumerService {
                 // Try to detect alert type automatically based on structure
                 if Self::looks_like_edr(&json_value) {
                     if let Ok(edr_alert) = serde_json::from_value::<EdrAlert>(json_value) {
-                        Self::store_edr_alert(&edr_alert, kafka_message, &clickhouse).await?;
+                        Self::store_edr_alert(&edr_alert, kafka_message, &clickhouse, kafka_config_name).await?;
                     } else {
                         debug!("Message looks like EDR but failed to parse");
                     }
                 } else if Self::looks_like_ngav(&json_value) {
                     if let Ok(ngav_alert) = serde_json::from_value::<NgavAlert>(json_value) {
-                        Self::store_ngav_alert(&ngav_alert, kafka_message, &clickhouse).await?;
+                        Self::store_ngav_alert(&ngav_alert, kafka_message, &clickhouse, kafka_config_name).await?;
                     } else {
                         debug!("Message looks like NGAV but failed to parse");
                     }
@@ -296,6 +299,7 @@ impl ConsumerService {
         edr_alert: &EdrAlert,
         kafka_message: &KafkaMessage,
         clickhouse: &ClickHouseConnection,
+        kafka_config_name: &str,
     ) -> Result<()> {
         debug!("Storing EDR alert: {}", edr_alert.get_alert_key());
 
@@ -304,6 +308,7 @@ impl ConsumerService {
         common_alert.kafka_topic = kafka_message.topic.clone();
         common_alert.kafka_partition = kafka_message.partition as u32;
         common_alert.kafka_offset = kafka_message.offset as u64;
+        common_alert.kafka_config_name = kafka_config_name.to_string();
 
         // Create EDR specific alert
         let mut edr_row = EdrAlertRow::from(edr_alert);
@@ -328,6 +333,7 @@ impl ConsumerService {
         ngav_alert: &NgavAlert,
         kafka_message: &KafkaMessage,
         clickhouse: &ClickHouseConnection,
+        kafka_config_name: &str,
     ) -> Result<()> {
         debug!("Storing NGAV alert: {}", ngav_alert.get_alert_key());
 
@@ -336,6 +342,7 @@ impl ConsumerService {
         common_alert.kafka_topic = kafka_message.topic.clone();
         common_alert.kafka_partition = kafka_message.partition as u32;
         common_alert.kafka_offset = kafka_message.offset as u64;
+        common_alert.kafka_config_name = kafka_config_name.to_string();
 
         // Create NGAV specific alert
         let mut ngav_row = NgavAlertRow::from(ngav_alert);
