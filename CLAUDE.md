@@ -10,11 +10,13 @@ This is a Rust-based cybersecurity alert processing system that uses Apache Kafk
 
 ### Building and Running
 - `cargo build` - Build the project
+- `cargo build --release` - Build optimized release version
 - `cargo run` - Run the main application (auto-detects and loads alert files or sends sample alerts)
 - `cargo run --bin kafka-sender` - Run the standalone Kafka message sender with CLI options  
 - `cargo run --bin kafka-consumer` - Run the standalone Kafka message consumer with CLI options
 - `cargo run --bin web-server` - Run the Axum web server with React frontend on http://localhost:3000
 - `cargo run --bin web-server -- --init` - Initialize database (drops and recreates `alert_server` database)
+- `cargo run --bin web-server -- --port 8080` - Run web server on custom port
 - `cargo test` - Run tests
 - `make build` - Build both frontend and backend
 - `make start` - Build and start the web server
@@ -99,22 +101,50 @@ The `atlasv2/data/attack/` directory contains organized cybersecurity datasets:
 
 ### kafka-sender Binary
 Standalone tool for sending JSONL data to Kafka with rate control:
-- `--data <file>` - JSONL data file path
-- `--data-type <type>` - Data type: alert, edr, ngav
+- `--bootstrap-servers <servers>` - Kafka bootstrap servers (required)
+- `--topic <topic>` - Kafka topic to send to (required)
+- `--group-id <id>` - Consumer group ID (required)
+- `--data <file>` - JSONL data file path (required)
+- `--data-type <type>` - Data type: alert, edr, ngav (required)
 - `--rate <n>` - Messages per second (default: 10)
 - `--max-messages <n>` - Message limit (0 = unlimited)
 - `--config <file>` - Configuration file (default: config.toml)
 - `--verbose` - Enable verbose logging
 
+Example usage:
+```bash
+cargo run --bin kafka-sender -- \
+  --bootstrap-servers 10.26.64.224:9093 \
+  --topic alerts-edr \
+  --group-id 1 \
+  --data atlasv2/data/attack/h1/cbc-edr-alerts/edr-alerts-h1-m1.jsonl \
+  --data-type edr \
+  --rate 50
+```
+
 ### kafka-consumer Binary
 Standalone tool for consuming and displaying Kafka messages:
+- `--config <file>` - Configuration file (default: config.toml)
 - `--pretty` - Pretty print JSON messages
 - `--metadata` - Show message metadata (offset, partition, timestamp)
 - `--max-messages <n>` - Message limit (0 = unlimited)
 - `--group-id <id>` - Consumer group ID override
 - `--topic <topic>` - Topic name override
-- `--offset-reset <mode>` - earliest, latest, or none
+- `--offset-reset <mode>` - earliest, latest, or none (default: earliest)
 - `--verbose` - Enable verbose logging
+
+Example usage:
+```bash
+# Basic consumption with pretty printing
+cargo run --bin kafka-consumer -- --pretty --metadata
+
+# Consume specific topic with message limit
+cargo run --bin kafka-consumer -- \
+  --topic alerts-edr \
+  --group-id consumer-group-1 \
+  --max-messages 100 \
+  --pretty
+```
 
 ### web-server Binary
 Axum-based web server with React frontend for comprehensive alert management:
@@ -176,6 +206,16 @@ The React frontend is located in `frontend/` directory:
 - **Frontend**: Built React app in `frontend/dist/` (served statically by web server)
 - The application will use default configuration if database connection fails
 
+## Docker Support
+
+The project includes Docker configuration for easy deployment:
+- `docker-compose.yml` - Full stack deployment with Kafka, ClickHouse, and PostgreSQL
+- `docker-compose.init.yml` - Initial setup for database services
+- `docker/` directory contains service-specific Docker Compose files:
+  - `docker-compose.kafka.yml` - Kafka cluster setup
+  - `docker-compose.clickhouse.yml` - ClickHouse configuration
+  - `docker-compose.pg.yml` - PostgreSQL database setup
+
 ## Database Initialization Process
 
 When the web server starts, it automatically:
@@ -235,3 +275,22 @@ All tables use:
 - Supports multiple active Kafka configurations simultaneously
 - Real-time status monitoring through web UI
 - Graceful start/stop with error recovery
+
+## File Structure
+
+Key directories and files:
+- `src/` - Rust source code
+  - `alert.rs` - Generic alert structure with factory methods
+  - `edr_alert.rs` - Carbon Black EDR alert definitions  
+  - `ngav_alert.rs` - Carbon Black NGAV alert definitions
+  - `kafka/` - Kafka producer/consumer implementation
+  - `database.rs` - PostgreSQL connection and configuration management
+  - `clickhouse.rs` - ClickHouse client for alert storage
+  - `consumer_service.rs` - Background service for message processing
+  - `bin/` - Executable binaries (kafka-sender, kafka-consumer, web-server)
+- `frontend/` - React web interface with Vite build system
+- `atlasv2/data/attack/` - Cybersecurity datasets organized by scenarios
+- `init.sql` - PostgreSQL database initialization script
+- `clickhouse_init.sql` - ClickHouse table creation script
+- `config.toml` - Default Kafka configuration (fallback)
+- `Makefile` - Build automation for frontend/backend

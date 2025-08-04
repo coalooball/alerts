@@ -43,7 +43,7 @@ INSERT INTO kafka_configs (
     is_active
 ) VALUES (
     'edr',
-    '10.26.64.224:9093',
+    '127.0.0.1:9092',
     'alerts-edr',
     '1',
     5000,
@@ -71,7 +71,7 @@ INSERT INTO kafka_configs (
     is_active
 ) VALUES (
     'ngav',
-    '10.26.64.224:9093',
+    '127.0.0.1:9092',
     'alerts-ngav',
     '2',
     5000,
@@ -163,7 +163,7 @@ INSERT INTO clickhouse_config (
     max_connections
 ) VALUES (
     'default',
-    '10.26.64.224',
+    '127.0.0.1',
     8123,
     'default',
     'default',

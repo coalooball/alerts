@@ -15,8 +15,8 @@ pub struct DatabaseConfig {
 impl Default for DatabaseConfig {
     fn default() -> Self {
         Self {
-            host: "10.26.64.224".to_string(),
-            port: 5432,
+            host: "127.0.0.1".to_string(),
+            port: 5433,
             database: "alert_server".to_string(),
             username: "postgres".to_string(),
             password: "postgres".to_string(),
@@ -27,9 +27,9 @@ impl Default for DatabaseConfig {
 impl DatabaseConfig {
     pub fn from_env() -> Self {
         Self {
-            host: env::var("DB_HOST").unwrap_or_else(|_| "10.26.64.224".to_string()),
+            host: env::var("DB_HOST").unwrap_or_else(|_| "127.0.0.1".to_string()),
             port: env::var("DB_PORT")
-                .unwrap_or_else(|_| "5432".to_string())
+                .unwrap_or_else(|_| "5433".to_string())
                 .parse()
                 .unwrap_or(5432),
             database: env::var("DB_NAME").unwrap_or_else(|_| "alert_server".to_string()),
