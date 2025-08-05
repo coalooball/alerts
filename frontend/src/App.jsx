@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import './App.css';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ToastProvider } from './contexts/ToastContext';
+import { ToastContainer } from './components/Toast';
 
 // 导入自定义hooks
 import { useConfigs } from './hooks/useConfigs';
@@ -252,6 +253,7 @@ const AppContent = () => {
 
       <Tooltip tooltip={tooltip} />
       <TestModal testModal={testModal} closeTestModal={closeTestModal} />
+      <ToastContainer />
     </div>
   );
 };

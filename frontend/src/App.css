@@ -4167,6 +4167,32 @@ select.input {
   }
 }
 
+@keyframes slideInRight {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slideOutRight {
+  from {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+}
+
+.toast-exiting {
+  animation: slideOutRight 0.3s ease-in !important;
+}
+
 /* ================================ */
 /* 告警标注相关样式 */
 /* ================================ */

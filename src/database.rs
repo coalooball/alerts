@@ -604,7 +604,7 @@ impl Database {
             "#
         )
         .bind(annotation_id)
-        .bind(uuid::Uuid::parse_str(alert_data_id)?)
+        .bind(alert_data_id)
         .bind(annotation_type)
         .bind(labels_json)
         .bind(confidence.map(|c| c as f32))
@@ -683,7 +683,7 @@ impl Database {
         let mut sqlx_query = sqlx::query(&query);
 
         if let Some(alert_id) = alert_data_id {
-            sqlx_query = sqlx_query.bind(uuid::Uuid::parse_str(alert_id)?);
+            sqlx_query = sqlx_query.bind(alert_id);
         }
         if let Some(ann_type) = annotation_type {
             sqlx_query = sqlx_query.bind(ann_type);
@@ -709,7 +709,7 @@ impl Database {
         for row in rows {
             let annotation = serde_json::json!({
                 "id": row.get::<uuid::Uuid, _>("id"),
-                "alert_data_id": row.get::<uuid::Uuid, _>("alert_data_id"),
+                "alert_data_id": row.get::<String, _>("alert_data_id"),
                 "annotation_type": row.get::<String, _>("annotation_type"),
                 "labels": row.get::<Option<serde_json::Value>, _>("labels"),
                 "confidence": row.get::<Option<f32>, _>("confidence"),

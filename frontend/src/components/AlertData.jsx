@@ -217,13 +217,19 @@ const AlertData = () => {
         if (activeTab === 'annotations') {
           fetchAnnotations();
         }
-        alert('标注保存成功！');
+        if (window.showToast) {
+          window.showToast('标注保存成功！', 'success');
+        }
       } else {
-        alert('标注保存失败: ' + data.message);
+        if (window.showToast) {
+          window.showToast('标注保存失败: ' + data.message, 'error');
+        }
       }
     } catch (error) {
       console.error('Error saving annotation:', error);
-      alert('保存标注时发生错误');
+      if (window.showToast) {
+        window.showToast('保存标注时发生错误', 'error');
+      }
     }
   };
 

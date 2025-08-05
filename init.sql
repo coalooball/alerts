@@ -416,8 +416,8 @@ CREATE INDEX IF NOT EXISTS idx_alert_data_parsed_data ON alert_data USING GIN (p
 CREATE TABLE IF NOT EXISTS alert_annotations (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     
-    -- 关联告警
-    alert_data_id UUID NOT NULL REFERENCES alert_data(id) ON DELETE CASCADE,
+    -- 关联告警 (使用字符串ID，不使用外键约束因为告警数据存储在ClickHouse)
+    alert_data_id VARCHAR(255) NOT NULL,
     
     -- 标注信息
     annotation_type VARCHAR(50) NOT NULL,                 -- 标注类型 (threat_indicator, false_positive, benign, malicious, etc.)
