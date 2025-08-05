@@ -30,6 +30,24 @@ This is a Rust-based cybersecurity alert processing system that uses Apache Kafk
 - `make dev-backend` - Build backend in development mode
 - `make init-db` - Initialize database schema (drop and recreate)
 
+## Authentication System
+
+### Login Credentials
+- **Username**: `admin`
+- **Password**: `admin123`
+
+### Clear Login Session (Force Re-login)
+To clear your login session and return to the login page, open browser console (F12) and execute:
+```javascript
+localStorage.removeItem('sessionToken'); window.location.reload();
+```
+
+### Session Management
+- Sessions expire after 24 hours
+- Session tokens are stored in localStorage
+- Logging out invalidates the session on the server
+- The system requires authentication to access all features
+
 ## Architecture
 
 ### Core Alert Types
