@@ -1,10 +1,14 @@
 import React, { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import ProfileSettingsModal from './ProfileSettingsModal';
+import SecuritySettingsModal from './SecuritySettingsModal';
 
 const UserInfo = () => {
   const { user, logout, isLoading } = useAuth();
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  const [showSecurityModal, setShowSecurityModal] = useState(false);
 
   if (isLoading) {
     return (
@@ -86,7 +90,8 @@ const UserInfo = () => {
               className="menu-action-btn profile-btn"
               onClick={(e) => {
                 e.stopPropagation();
-                alert('Profile management coming soon!');
+                setShowUserMenu(false);
+                setShowProfileModal(true);
               }}
             >
               <span>⚙️</span>
@@ -97,7 +102,8 @@ const UserInfo = () => {
               className="menu-action-btn security-btn"
               onClick={(e) => {
                 e.stopPropagation();
-                alert('Security settings coming soon!');
+                setShowUserMenu(false);
+                setShowSecurityModal(true);
               }}
             >
               <span>🔒</span>
@@ -117,6 +123,18 @@ const UserInfo = () => {
           </div>
         </div>
       )}
+
+      {/* Profile Settings Modal */}
+      <ProfileSettingsModal
+        isOpen={showProfileModal}
+        onClose={() => setShowProfileModal(false)}
+      />
+
+      {/* Security Settings Modal */}
+      <SecuritySettingsModal
+        isOpen={showSecurityModal}
+        onClose={() => setShowSecurityModal(false)}
+      />
     </div>
   );
 };

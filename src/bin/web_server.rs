@@ -383,6 +383,8 @@ async fn main() -> Result<()> {
         .route("/api/login", post(login))
         .route("/api/logout", post(logout))
         .route("/api/me", get(get_current_user))
+        .route("/api/profile", put(update_profile))
+        .route("/api/change-password", post(change_password))
         // User management routes (admin only)
         .route("/api/users", get(list_users))
         .route("/api/users", post(create_user))
@@ -1679,6 +1681,190 @@ struct UpdateUserRequest {
 #[derive(Deserialize)]
 struct UpdatePasswordRequest {
     password: String,
+}
+
+#[derive(Deserialize)]
+struct ChangePasswordRequest {
+    #[serde(rename = "currentPassword")]
+    current_password: String,
+    #[serde(rename = "newPassword")]
+    new_password: String,
+}
+
+#[derive(Deserialize)]
+struct UpdateProfileRequest {
+    username: String,
+    email: String,
+    #[serde(rename = "fullName")]
+    full_name: Option<String>,
+    phone: Option<String>,
+    department: Option<String>,
+    timezone: Option<String>,
+    language: Option<String>,
+    #[serde(rename = "emailNotifications")]
+    email_notifications: Option<bool>,
+    #[serde(rename = "smsNotifications")]
+    sms_notifications: Option<bool>,
+}
+
+async fn update_profile(
+    State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
+    Json(request): Json<UpdateProfileRequest>,
+) -> Result<ResponseJson<serde_json::Value>, StatusCode> {
+    // Extract session token from headers
+    let session_token = match headers.get("authorization") {
+        Some(value) => {
+            let auth_header = value.to_str().unwrap_or("");
+            if auth_header.starts_with("Bearer ") {
+                &auth_header[7..]
+            } else {
+                return Ok(ResponseJson(serde_json::json!({
+                    "success": false,
+                    "message": "Invalid authorization header format"
+                })));
+            }
+        }
+        None => {
+            return Ok(ResponseJson(serde_json::json!({
+                "success": false,
+                "message": "No authorization header provided"
+            })));
+        }
+    };
+
+    // Validate session and get current user
+    let current_user = match state.auth_service.validate_session(session_token).await {
+        Ok(Some(user)) => user,
+        Ok(None) => {
+            return Ok(ResponseJson(serde_json::json!({
+                "success": false,
+                "message": "Invalid or expired session"
+            })));
+        }
+        Err(e) => {
+            error!("❌ Session validation error: {}", e);
+            return Ok(ResponseJson(serde_json::json!({
+                "success": false,
+                "message": "Session validation error"
+            })));
+        }
+    };
+
+    info!("Updating profile for user: {}", current_user.username);
+
+    // Update user profile - users can update their own profile
+    match state.auth_service.update_user_profile(
+        current_user.id,
+        &request.username,
+        &request.email,
+        request.full_name.as_deref(),
+        request.phone.as_deref(),
+        request.department.as_deref(),
+        &request.timezone.unwrap_or_else(|| "UTC".to_string()),
+        &request.language.unwrap_or_else(|| "en".to_string()),
+        request.email_notifications.unwrap_or(true),
+        request.sms_notifications.unwrap_or(false),
+    ).await {
+        Ok(_) => {
+            info!("✅ Profile updated successfully for user: {}", current_user.username);
+            Ok(ResponseJson(serde_json::json!({
+                "success": true,
+                "message": "Profile updated successfully"
+            })))
+        }
+        Err(e) => {
+            error!("❌ Failed to update profile: {}", e);
+            Ok(ResponseJson(serde_json::json!({
+                "success": false,
+                "message": format!("Failed to update profile: {}", e)
+            })))
+        }
+    }
+}
+
+async fn change_password(
+    State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
+    Json(request): Json<ChangePasswordRequest>,
+) -> Result<ResponseJson<serde_json::Value>, StatusCode> {
+    // Extract session token from headers
+    let session_token = match headers.get("authorization") {
+        Some(value) => {
+            let auth_header = value.to_str().unwrap_or("");
+            if auth_header.starts_with("Bearer ") {
+                &auth_header[7..]
+            } else {
+                return Ok(ResponseJson(serde_json::json!({
+                    "success": false,
+                    "message": "Invalid authorization header format"
+                })));
+            }
+        }
+        None => {
+            return Ok(ResponseJson(serde_json::json!({
+                "success": false,
+                "message": "No authorization header provided"
+            })));
+        }
+    };
+
+    // Validate session and get current user
+    let current_user = match state.auth_service.validate_session(session_token).await {
+        Ok(Some(user)) => user,
+        Ok(None) => {
+            return Ok(ResponseJson(serde_json::json!({
+                "success": false,
+                "message": "Invalid or expired session"
+            })));
+        }
+        Err(e) => {
+            error!("❌ Session validation error: {}", e);
+            return Ok(ResponseJson(serde_json::json!({
+                "success": false,
+                "message": "Session validation error"
+            })));
+        }
+    };
+
+    info!("Changing password for user: {}", current_user.username);
+
+    // First verify current password
+    match state.auth_service.authenticate_user(&current_user.username, &request.current_password).await {
+        Ok(Some(_)) => {
+            // Current password is correct, proceed with password change
+            match state.auth_service.update_user_password(current_user.id, &request.new_password).await {
+                Ok(_) => {
+                    info!("✅ Password changed successfully for user: {}", current_user.username);
+                    Ok(ResponseJson(serde_json::json!({
+                        "success": true,
+                        "message": "Password changed successfully"
+                    })))
+                }
+                Err(e) => {
+                    error!("❌ Failed to update password: {}", e);
+                    Ok(ResponseJson(serde_json::json!({
+                        "success": false,
+                        "message": "Failed to update password"
+                    })))
+                }
+            }
+        }
+        Ok(None) => {
+            info!("❌ Invalid current password for user: {}", current_user.username);
+            Ok(ResponseJson(serde_json::json!({
+                "success": false,
+                "message": "Current password is incorrect"
+            })))
+        }
+        Err(e) => {
+            error!("❌ Error verifying current password: {}", e);
+            Ok(ResponseJson(serde_json::json!({
+                "success": false,
+                "message": "Error verifying current password"
+            })))
+        }
+    }
 }
 
 async fn list_users(

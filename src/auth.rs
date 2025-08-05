@@ -12,6 +12,13 @@ pub struct User {
     pub email: String,
     pub role: String,
     pub is_active: bool,
+    pub full_name: Option<String>,
+    pub phone: Option<String>,
+    pub department: Option<String>,
+    pub timezone: String,
+    pub language: String,
+    pub email_notifications: bool,
+    pub sms_notifications: bool,
     pub created_at: chrono::DateTime<Utc>,
     pub updated_at: chrono::DateTime<Utc>,
 }
@@ -70,12 +77,20 @@ impl AuthService {
             password_hash: String,
             role: String,
             is_active: bool,
+            full_name: Option<String>,
+            phone: Option<String>,
+            department: Option<String>,
+            timezone: String,
+            language: String,
+            email_notifications: bool,
+            sms_notifications: bool,
             created_at: chrono::DateTime<chrono::Utc>,
             updated_at: chrono::DateTime<chrono::Utc>,
         }
 
         let user = sqlx::query_as::<_, UserRow>(
-            "SELECT id, username, email, password_hash, role, is_active, created_at, updated_at 
+            "SELECT id, username, email, password_hash, role, is_active, full_name, phone, department, 
+             timezone, language, email_notifications, sms_notifications, created_at, updated_at 
              FROM users WHERE username = $1 AND is_active = true"
         )
         .bind(username)
@@ -92,6 +107,13 @@ impl AuthService {
                     email: user_row.email,
                     role: user_row.role,
                     is_active: user_row.is_active,
+                    full_name: user_row.full_name,
+                    phone: user_row.phone,
+                    department: user_row.department,
+                    timezone: user_row.timezone,
+                    language: user_row.language,
+                    email_notifications: user_row.email_notifications,
+                    sms_notifications: user_row.sms_notifications,
                     created_at: user_row.created_at,
                     updated_at: user_row.updated_at,
                 }));
@@ -148,12 +170,21 @@ impl AuthService {
             email: String,
             role: String,
             is_active: bool,
+            full_name: Option<String>,
+            phone: Option<String>,
+            department: Option<String>,
+            timezone: String,
+            language: String,
+            email_notifications: bool,
+            sms_notifications: bool,
             created_at: chrono::DateTime<chrono::Utc>,
             updated_at: chrono::DateTime<chrono::Utc>,
         }
 
         let session = sqlx::query_as::<_, SessionUserRow>(
-            "SELECT us.user_id, us.expires_at, u.id, u.username, u.email, u.role, u.is_active, u.created_at, u.updated_at
+            "SELECT us.user_id, us.expires_at, u.id, u.username, u.email, u.role, u.is_active, 
+             u.full_name, u.phone, u.department, u.timezone, u.language, u.email_notifications, u.sms_notifications,
+             u.created_at, u.updated_at
              FROM user_sessions us
              JOIN users u ON us.user_id = u.id
              WHERE us.session_token = $1 AND us.expires_at > NOW() AND u.is_active = true"
@@ -169,6 +200,13 @@ impl AuthService {
                 email: session.email,
                 role: session.role,
                 is_active: session.is_active,
+                full_name: session.full_name,
+                phone: session.phone,
+                department: session.department,
+                timezone: session.timezone,
+                language: session.language,
+                email_notifications: session.email_notifications,
+                sms_notifications: session.sms_notifications,
                 created_at: session.created_at,
                 updated_at: session.updated_at,
             }));
@@ -226,12 +264,20 @@ impl AuthService {
             email: String,
             role: String,
             is_active: bool,
+            full_name: Option<String>,
+            phone: Option<String>,
+            department: Option<String>,
+            timezone: String,
+            language: String,
+            email_notifications: bool,
+            sms_notifications: bool,
             created_at: chrono::DateTime<chrono::Utc>,
             updated_at: chrono::DateTime<chrono::Utc>,
         }
 
         let users = sqlx::query_as::<_, UserRow>(
-            "SELECT id, username, email, role, is_active, created_at, updated_at 
+            "SELECT id, username, email, role, is_active, full_name, phone, department, 
+             timezone, language, email_notifications, sms_notifications, created_at, updated_at 
              FROM users ORDER BY created_at DESC"
         )
         .fetch_all(&self.pool)
@@ -243,6 +289,13 @@ impl AuthService {
             email: user.email,
             role: user.role,
             is_active: user.is_active,
+            full_name: user.full_name,
+            phone: user.phone,
+            department: user.department,
+            timezone: user.timezone,
+            language: user.language,
+            email_notifications: user.email_notifications,
+            sms_notifications: user.sms_notifications,
             created_at: user.created_at,
             updated_at: user.updated_at,
         }).collect())
@@ -257,6 +310,30 @@ impl AuthService {
         .bind(email)
         .bind(role)
         .bind(is_active)
+        .bind(user_id)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    pub async fn update_user_profile(&self, user_id: Uuid, username: &str, email: &str, 
+        full_name: Option<&str>, phone: Option<&str>, department: Option<&str>, 
+        timezone: &str, language: &str, email_notifications: bool, sms_notifications: bool) -> Result<()> {
+        sqlx::query(
+            "UPDATE users SET username = $1, email = $2, full_name = $3, phone = $4, department = $5, 
+             timezone = $6, language = $7, email_notifications = $8, sms_notifications = $9, updated_at = NOW() 
+             WHERE id = $10"
+        )
+        .bind(username)
+        .bind(email)
+        .bind(full_name)
+        .bind(phone)
+        .bind(department)
+        .bind(timezone)
+        .bind(language)
+        .bind(email_notifications)
+        .bind(sms_notifications)
         .bind(user_id)
         .execute(&self.pool)
         .await?;
@@ -300,12 +377,20 @@ impl AuthService {
             email: String,
             role: String,
             is_active: bool,
+            full_name: Option<String>,
+            phone: Option<String>,
+            department: Option<String>,
+            timezone: String,
+            language: String,
+            email_notifications: bool,
+            sms_notifications: bool,
             created_at: chrono::DateTime<chrono::Utc>,
             updated_at: chrono::DateTime<chrono::Utc>,
         }
 
         let user = sqlx::query_as::<_, UserRow>(
-            "SELECT id, username, email, role, is_active, created_at, updated_at 
+            "SELECT id, username, email, role, is_active, full_name, phone, department, 
+             timezone, language, email_notifications, sms_notifications, created_at, updated_at 
              FROM users WHERE id = $1"
         )
         .bind(user_id)
@@ -318,6 +403,13 @@ impl AuthService {
             email: u.email,
             role: u.role,
             is_active: u.is_active,
+            full_name: u.full_name,
+            phone: u.phone,
+            department: u.department,
+            timezone: u.timezone,
+            language: u.language,
+            email_notifications: u.email_notifications,
+            sms_notifications: u.sms_notifications,
             created_at: u.created_at,
             updated_at: u.updated_at,
         }))

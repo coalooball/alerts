@@ -104,12 +104,19 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
+  const refreshUser = async () => {
+    if (sessionToken) {
+      await validateSession();
+    }
+  };
+
   const value = {
     user,
     isLoading,
     sessionToken,
     login,
     logout,
+    refreshUser,
   };
 
   return (
