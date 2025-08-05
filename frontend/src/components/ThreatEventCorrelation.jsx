@@ -183,36 +183,25 @@ const ThreatEventCorrelation = () => {
 
             <form className="correlation-form">
               <div className="form-group">
-                <label>选择威胁事件 *:</label>
-                <select
-                  className="form-select"
+                <label>威胁事件 *:</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="请输入威胁事件名称或ID..."
                   value={selectedThreatEvent}
                   onChange={(e) => setSelectedThreatEvent(e.target.value)}
-                >
-                  <option value="">请选择威胁事件...</option>
-                  {threatEvents.map((event) => (
-                    <option key={event.id} value={event.id}>
-                      {event.title} - {event.event_type}
-                    </option>
-                  ))}
-                </select>
+                />
               </div>
 
               <div className="form-group">
                 <label>关联类型 *:</label>
-                <select
-                  className="form-select"
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="请输入关联类型 (如: 时间关联、行为关联、设备关联等)..."
                   value={correlationType}
                   onChange={(e) => setCorrelationType(e.target.value)}
-                >
-                  <option value="">请选择关联类型...</option>
-                  <option value="temporal">时间关联</option>
-                  <option value="spatial">空间关联</option>
-                  <option value="indicator">指标关联</option>
-                  <option value="behavior">行为关联</option>
-                  <option value="device">设备关联</option>
-                  <option value="user">用户关联</option>
-                </select>
+                />
               </div>
 
               <div className="form-group">
