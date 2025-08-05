@@ -178,6 +178,10 @@ const AlertData = () => {
                   <label>创建时间:</label>
                   <span>{formatTimestamp(selectedAlert.create_time)}</span>
                 </div>
+                <div className="detail-item">
+                  <label>Kafka来源:</label>
+                  <span>{selectedAlert.kafka_config_name || '未知'}</span>
+                </div>
               </div>
 
               {/* Device Information */}
@@ -296,12 +300,13 @@ const AlertData = () => {
                   <th>设备IP</th>
                   <th>告警类型</th>
                   <th>威胁类别</th>
+                  <th>Kafka来源</th>
                 </tr>
               </thead>
               <tbody>
                 {alerts.length === 0 ? (
                   <tr>
-                    <td colSpan="7" className="no-data">
+                    <td colSpan="8" className="no-data">
                       暂无告警数据
                     </td>
                   </tr>
@@ -336,6 +341,9 @@ const AlertData = () => {
                       <td className="alert-type-cell">{alert.alert_type}</td>
                       <td className="threat-category-cell">
                         {alert.threat_category || '-'}
+                      </td>
+                      <td className="kafka-source-cell">
+                        {alert.kafka_config_name || '-'}
                       </td>
                     </tr>
                   ))

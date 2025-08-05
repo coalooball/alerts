@@ -1600,6 +1600,16 @@ select.input {
   color: #e53e3e;
 }
 
+.kafka-source-cell {
+  font-size: 0.85rem;
+  color: #805ad5;
+  font-weight: 500;
+  background-color: #faf5ff;
+  border-radius: 4px;
+  padding: 0.25rem 0.5rem;
+  text-align: center;
+}
+
 .no-data {
   text-align: center;
   padding: 3rem;

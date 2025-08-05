@@ -1188,33 +1188,80 @@ async fn get_alert_detail(
                     // Get specific alert details based on type
                     let specific_alert = match data_type.as_str() {
                         "edr" => {
-                            ch.get_edr_alert_by_id(&id).await
-                                .unwrap_or(None)
-                                .map(|alert| serde_json::to_value(alert).unwrap_or_default())
+                            match ch.get_edr_alert_by_id(&id).await {
+                                Ok(Some(alert)) => {
+                                    match serde_json::to_value(alert) {
+                                        Ok(value) => Some(value),
+                                        Err(e) => {
+                                            error!("Failed to serialize EDR alert {}: {}", id, e);
+                                            None
+                                        }
+                                    }
+                                },
+                                Ok(None) => None,
+                                Err(e) => {
+                                    error!("Failed to get EDR alert {}: {}", id, e);
+                                    None
+                                }
+                            }
                         }
                         "ngav" => {
-                            ch.get_ngav_alert_by_id(&id).await
-                                .unwrap_or(None)
-                                .map(|alert| serde_json::to_value(alert).unwrap_or_default())
+                            match ch.get_ngav_alert_by_id(&id).await {
+                                Ok(Some(alert)) => {
+                                    match serde_json::to_value(alert) {
+                                        Ok(value) => Some(value),
+                                        Err(e) => {
+                                            error!("Failed to serialize NGAV alert {}: {}", id, e);
+                                            None
+                                        }
+                                    }
+                                },
+                                Ok(None) => None,
+                                Err(e) => {
+                                    error!("Failed to get NGAV alert {}: {}", id, e);
+                                    None
+                                }
+                            }
                         }
                         _ => None
                     };
                     
-                    let mut alert_json = serde_json::to_value(common_alert).unwrap_or_default();
-                    if let Some(specific) = specific_alert {
-                        if let (Some(alert_obj), Some(specific_obj)) = 
-                            (alert_json.as_object_mut(), specific.as_object()) {
-                            for (key, value) in specific_obj {
-                                alert_obj.insert(format!("detailed_{}", key), value.clone());
+                    // Safely serialize the common alert
+                    match serde_json::to_value(&common_alert) {
+                        Ok(mut alert_json) => {
+                            if let Some(specific) = specific_alert {
+                                if let (Some(alert_obj), Some(specific_obj)) = 
+                                    (alert_json.as_object_mut(), specific.as_object()) {
+                                    for (key, value) in specific_obj {
+                                        alert_obj.insert(format!("detailed_{}", key), value.clone());
+                                    }
+                                }
                             }
+                            
+                            Ok(ResponseJson(AlertDetailResponse {
+                                success: true,
+                                alert: Some(alert_json),
+                                alert_type: Some(data_type),
+                            }))
+                        },
+                        Err(e) => {
+                            error!("Failed to serialize alert detail for ID {}: {}", id, e);
+                            // Create a minimal safe response
+                            let safe_alert = serde_json::json!({
+                                "id": common_alert.id,
+                                "device_name": common_alert.device_name,
+                                "severity": common_alert.severity,
+                                "data_type": common_alert.data_type,
+                                "error": "Full alert data could not be serialized due to encoding issues"
+                            });
+                            
+                            Ok(ResponseJson(AlertDetailResponse {
+                                success: true,
+                                alert: Some(safe_alert),
+                                alert_type: Some(data_type),
+                            }))
                         }
                     }
-                    
-                    Ok(ResponseJson(AlertDetailResponse {
-                        success: true,
-                        alert: Some(alert_json),
-                        alert_type: Some(data_type),
-                    }))
                 }
                 Ok(None) => {
                     Ok(ResponseJson(AlertDetailResponse {

@@ -608,21 +608,90 @@ impl ClickHouseConnection {
 
     pub async fn get_common_alert_by_id(&self, id: &str) -> Result<Option<CommonAlert>> {
         let query = r#"SELECT 
-            id, original_id, data_type, 
+            toString(id) as id, 
+            toString(original_id) as original_id, 
+            toString(data_type) as data_type, 
             toString(create_time) as create_time,
-            device_id, device_name, device_os,
-            device_internal_ip, device_external_ip, org_key,
-            severity, alert_type, threat_category, device_username,
-            raw_data, toString(processed_time) as processed_time,
-            kafka_topic, kafka_partition, kafka_offset, kafka_config_name
+            device_id, 
+            toString(device_name) as device_name, 
+            toString(device_os) as device_os,
+            toString(device_internal_ip) as device_internal_ip, 
+            toString(device_external_ip) as device_external_ip, 
+            toString(org_key) as org_key,
+            severity, 
+            toString(alert_type) as alert_type, 
+            toString(threat_category) as threat_category, 
+            toString(device_username) as device_username,
+            toString(raw_data) as raw_data, 
+            toString(processed_time) as processed_time,
+            toString(kafka_topic) as kafka_topic, 
+            kafka_partition, kafka_offset, 
+            toString(kafka_config_name) as kafka_config_name
         FROM alerts.common_alerts WHERE id = ?"#;
         
-        let mut cursor = self.client.query(query).bind(id).fetch()?;
+        log::debug!("Getting alert detail for ID: {}", id);
         
-        if let Some(row) = cursor.next().await? {
-            Ok(Some(self.clean_common_alert(row)))
-        } else {
-            Ok(None)
+        match self.client.query(query).bind(id).fetch() {
+            Ok(mut cursor) => {
+                match cursor.next().await {
+                    Ok(Some(row)) => {
+                        log::debug!("Found alert with ID: {}", id);
+                        Ok(Some(self.clean_common_alert(row)))
+                    },
+                    Ok(None) => {
+                        log::debug!("No alert found with ID: {}", id);
+                        Ok(None)
+                    },
+                    Err(e) => {
+                        log::error!("Failed to fetch alert row for ID {}: {}", id, e);
+                        // Try a fallback query with minimal fields
+                        self.get_alert_by_id_fallback(id).await
+                    }
+                }
+            },
+            Err(e) => {
+                log::error!("Failed to prepare query for alert ID {}: {}", id, e);
+                Err(e.into())
+            }
+        }
+    }
+
+    async fn get_alert_by_id_fallback(&self, id: &str) -> Result<Option<CommonAlert>> {
+        log::warn!("Using fallback method to get alert detail for ID: {}", id);
+        
+        // Try a very basic query with only essential fields
+        let simple_query = "SELECT toString(id) as id, toString(device_name) as device_name, severity FROM alerts.common_alerts WHERE id = ?";
+        
+        match self.client.query(simple_query).bind(id).fetch_one::<(String, String, u8)>().await {
+            Ok((alert_id, device_name, severity)) => {
+                log::info!("Fallback query found alert: {}", alert_id);
+                Ok(Some(CommonAlert {
+                    id: Self::clean_string(alert_id),
+                    original_id: "".to_string(),
+                    data_type: "unknown".to_string(),
+                    create_time: "".to_string(),
+                    device_id: 0,
+                    device_name: Self::clean_string(device_name),
+                    device_os: "".to_string(),
+                    device_internal_ip: "".to_string(),
+                    device_external_ip: "".to_string(),
+                    org_key: "".to_string(),
+                    severity,
+                    alert_type: "".to_string(),
+                    threat_category: "".to_string(),
+                    device_username: "".to_string(),
+                    raw_data: "{\"error\": \"Data retrieval failed, showing minimal info\"}".to_string(),
+                    processed_time: "".to_string(),
+                    kafka_topic: "".to_string(),
+                    kafka_partition: 0,
+                    kafka_offset: 0,
+                    kafka_config_name: "".to_string(),
+                }))
+            },
+            Err(e) => {
+                log::error!("Even fallback query failed for ID {}: {}", id, e);
+                Ok(None)
+            }
         }
     }
 
@@ -653,9 +722,9 @@ impl ClickHouseConnection {
     pub async fn get_alert_count_by_type(&self) -> Result<serde_json::Value> {
         let query = r#"
             SELECT 
-                data_type,
+                toString(data_type) as data_type,
                 count(*) as count,
-                max(create_time) as latest_time
+                toString(max(processed_time)) as latest_time
             FROM alerts.common_alerts 
             GROUP BY data_type
         "#;
@@ -683,9 +752,14 @@ impl ClickHouseConnection {
     pub async fn get_alert_stats(&self, minutes: u32) -> Result<(f64, u64, std::collections::HashMap<String, u64>, std::collections::HashMap<String, u64>)> {
         use std::collections::HashMap;
         
+        log::debug!("Getting alert stats for last {} minutes", minutes);
+        
         // Get total message count
         let total_query = "SELECT count(*) as total FROM alerts.common_alerts";
-        let total: u64 = self.client.query(total_query).fetch_one().await?;
+        let total: u64 = self.client.query(total_query).fetch_one().await
+            .map_err(|e| anyhow::anyhow!("Failed to get total count: {}", e))?;
+        
+        log::debug!("Total alerts: {}", total);
         
         // Get message rate (messages per second in the last N minutes)
         let rate_query = format!(r#"
@@ -694,12 +768,15 @@ impl ClickHouseConnection {
             WHERE processed_time >= now() - INTERVAL {} MINUTE
         "#, minutes);
         
-        let recent_count: u64 = self.client.query(&rate_query).fetch_one().await?;
+        let recent_count: u64 = self.client.query(&rate_query).fetch_one().await
+            .map_err(|e| anyhow::anyhow!("Failed to get recent count: {}", e))?;
         let message_rate = recent_count as f64 / (minutes as f64 * 60.0);
+        
+        log::debug!("Recent count: {}, message rate: {:.2}/sec", recent_count, message_rate);
         
         // Get type breakdown
         let type_query = r#"
-            SELECT data_type, count(*) as count
+            SELECT toString(data_type) as data_type, count(*) as count
             FROM alerts.common_alerts
             GROUP BY data_type
         "#;
@@ -710,11 +787,14 @@ impl ClickHouseConnection {
             count: u64,
         }
         
-        let type_rows: Vec<TypeCount> = self.client.query(type_query).fetch_all().await?;
+        let type_rows: Vec<TypeCount> = self.client.query(type_query).fetch_all().await
+            .map_err(|e| anyhow::anyhow!("Failed to get type breakdown: {}", e))?;
         let mut type_breakdown = HashMap::new();
         for row in type_rows {
             type_breakdown.insert(row.data_type, row.count);
         }
+        
+        log::debug!("Type breakdown: {:?}", type_breakdown);
         
         // Get severity breakdown  
         let severity_query = r#"
@@ -735,11 +815,14 @@ impl ClickHouseConnection {
             count: u64,
         }
         
-        let severity_rows: Vec<SeverityCount> = self.client.query(severity_query).fetch_all().await?;
+        let severity_rows: Vec<SeverityCount> = self.client.query(severity_query).fetch_all().await
+            .map_err(|e| anyhow::anyhow!("Failed to get severity breakdown: {}", e))?;
         let mut severity_breakdown = HashMap::new();
         for row in severity_rows {
             severity_breakdown.insert(row.severity_level, row.count);
         }
+        
+        log::debug!("Severity breakdown: {:?}", severity_breakdown);
         
         Ok((message_rate, total, type_breakdown, severity_breakdown))
     }
