@@ -571,4 +571,168 @@ impl Database {
 
         Ok(())
     }
+
+    // ================================
+    // 告警标注相关函数
+    // ================================
+
+    pub async fn create_annotation(
+        &self,
+        alert_data_id: &str,
+        annotation_type: &str,
+        labels: Option<Vec<String>>,
+        confidence: Option<f64>,
+        is_malicious: Option<bool>,
+        threat_level: Option<&str>,
+        mitre_techniques: Option<Vec<String>>,
+        attack_stage: Option<&str>,
+        title: Option<&str>,
+        description: Option<&str>,
+        notes: Option<&str>,
+        annotated_by: uuid::Uuid,
+    ) -> Result<uuid::Uuid> {
+        let annotation_id = uuid::Uuid::new_v4();
+        let labels_json = labels.map(|l| serde_json::to_value(l).unwrap_or(serde_json::Value::Null));
+        let mitre_techniques_json = mitre_techniques.map(|mt| serde_json::to_value(mt).unwrap_or(serde_json::Value::Null));
+
+        sqlx::query(
+            r#"
+            INSERT INTO alert_annotations 
+            (id, alert_data_id, annotation_type, labels, confidence, is_malicious, 
+             threat_level, mitre_techniques, attack_stage, title, description, notes, annotated_by)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+            "#
+        )
+        .bind(annotation_id)
+        .bind(uuid::Uuid::parse_str(alert_data_id)?)
+        .bind(annotation_type)
+        .bind(labels_json)
+        .bind(confidence.map(|c| c as f32))
+        .bind(is_malicious)
+        .bind(threat_level)
+        .bind(mitre_techniques_json)
+        .bind(attack_stage)
+        .bind(title)
+        .bind(description)
+        .bind(notes)
+        .bind(annotated_by)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(annotation_id)
+    }
+
+    pub async fn get_annotations(
+        &self,
+        limit: u32,
+        offset: u32,
+        alert_data_id: Option<&str>,
+        annotation_type: Option<&str>,
+        is_malicious: Option<bool>,
+        threat_level: Option<&str>,
+        annotated_by: Option<uuid::Uuid>,
+        review_status: Option<&str>,
+    ) -> Result<Vec<serde_json::Value>> {
+        let mut query = r#"
+            SELECT aa.*, u1.username as annotated_by_username, u2.username as reviewed_by_username
+            FROM alert_annotations aa 
+            LEFT JOIN users u1 ON aa.annotated_by = u1.id
+            LEFT JOIN users u2 ON aa.reviewed_by = u2.id
+            WHERE 1=1
+        "#.to_string();
+
+        let mut bind_count = 0;
+        let mut conditions = Vec::new();
+
+        if alert_data_id.is_some() {
+            bind_count += 1;
+            conditions.push(format!("aa.alert_data_id = ${}", bind_count));
+        }
+        if annotation_type.is_some() {
+            bind_count += 1;
+            conditions.push(format!("aa.annotation_type = ${}", bind_count));
+        }
+        if is_malicious.is_some() {
+            bind_count += 1;
+            conditions.push(format!("aa.is_malicious = ${}", bind_count));
+        }
+        if threat_level.is_some() {
+            bind_count += 1;
+            conditions.push(format!("aa.threat_level = ${}", bind_count));
+        }
+        if annotated_by.is_some() {
+            bind_count += 1;
+            conditions.push(format!("aa.annotated_by = ${}", bind_count));
+        }
+        if review_status.is_some() {
+            bind_count += 1;
+            conditions.push(format!("aa.review_status = ${}", bind_count));
+        }
+
+        if !conditions.is_empty() {
+            query = format!("{} AND {}", query, conditions.join(" AND "));
+        }
+
+        bind_count += 1;
+        let limit_param = bind_count;
+        bind_count += 1;
+        let offset_param = bind_count;
+
+        query = format!("{} ORDER BY aa.annotated_at DESC LIMIT ${} OFFSET ${}", query, limit_param, offset_param);
+
+        let mut sqlx_query = sqlx::query(&query);
+
+        if let Some(alert_id) = alert_data_id {
+            sqlx_query = sqlx_query.bind(uuid::Uuid::parse_str(alert_id)?);
+        }
+        if let Some(ann_type) = annotation_type {
+            sqlx_query = sqlx_query.bind(ann_type);
+        }
+        if let Some(malicious) = is_malicious {
+            sqlx_query = sqlx_query.bind(malicious);
+        }
+        if let Some(threat_lvl) = threat_level {
+            sqlx_query = sqlx_query.bind(threat_lvl);
+        }
+        if let Some(annotator) = annotated_by {
+            sqlx_query = sqlx_query.bind(annotator);
+        }
+        if let Some(review_st) = review_status {
+            sqlx_query = sqlx_query.bind(review_st);
+        }
+
+        sqlx_query = sqlx_query.bind(limit as i64).bind(offset as i64);
+
+        let rows = sqlx_query.fetch_all(&self.pool).await?;
+
+        let mut annotations = Vec::new();
+        for row in rows {
+            let annotation = serde_json::json!({
+                "id": row.get::<uuid::Uuid, _>("id"),
+                "alert_data_id": row.get::<uuid::Uuid, _>("alert_data_id"),
+                "annotation_type": row.get::<String, _>("annotation_type"),
+                "labels": row.get::<Option<serde_json::Value>, _>("labels"),
+                "confidence": row.get::<Option<f32>, _>("confidence"),
+                "is_malicious": row.get::<Option<bool>, _>("is_malicious"),
+                "threat_level": row.get::<Option<String>, _>("threat_level"),
+                "mitre_techniques": row.get::<Option<serde_json::Value>, _>("mitre_techniques"),
+                "attack_stage": row.get::<Option<String>, _>("attack_stage"),
+                "title": row.get::<Option<String>, _>("title"),
+                "description": row.get::<Option<String>, _>("description"),
+                "notes": row.get::<Option<String>, _>("notes"),
+                "annotated_by": row.get::<uuid::Uuid, _>("annotated_by"),
+                "annotated_by_username": row.get::<Option<String>, _>("annotated_by_username"),
+                "annotated_at": row.get::<chrono::DateTime<chrono::Utc>, _>("annotated_at"),
+                "reviewed_by": row.get::<Option<uuid::Uuid>, _>("reviewed_by"),
+                "reviewed_by_username": row.get::<Option<String>, _>("reviewed_by_username"),
+                "reviewed_at": row.get::<Option<chrono::DateTime<chrono::Utc>>, _>("reviewed_at"),
+                "review_status": row.get::<String, _>("review_status"),
+                "created_at": row.get::<chrono::DateTime<chrono::Utc>, _>("created_at"),
+                "updated_at": row.get::<chrono::DateTime<chrono::Utc>, _>("updated_at")
+            });
+            annotations.push(annotation);
+        }
+
+        Ok(annotations)
+    }
 }

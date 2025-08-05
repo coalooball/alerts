@@ -4166,3 +4166,558 @@ select.input {
     opacity: 1;
   }
 }
+
+/* ================================ */
+/* 告警标注相关样式 */
+/* ================================ */
+
+/* 标注模态框样式 */
+.annotation-modal {
+  max-width: 800px;
+  width: 90vw;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.alert-info-section {
+  background: #f8f9fa;
+  border-radius: 8px;
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+  border: 1px solid #e2e8f0;
+}
+
+.alert-info-section h4 {
+  margin: 0 0 1rem 0;
+  color: #2d3748;
+  font-size: 1.1rem;
+  border-bottom: 2px solid #e2e8f0;
+  padding-bottom: 0.5rem;
+}
+
+.alert-info-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+}
+
+.info-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.info-item label {
+  font-weight: 600;
+  color: #4a5568;
+  font-size: 0.9rem;
+}
+
+.info-item span {
+  color: #2d3748;
+  font-size: 0.95rem;
+}
+
+.annotation-form-section {
+  background: white;
+}
+
+.annotation-form-section h4 {
+  margin: 0 0 1.5rem 0;
+  color: #2d3748;
+  font-size: 1.1rem;
+  border-bottom: 2px solid #e2e8f0;
+  padding-bottom: 0.5rem;
+}
+
+.annotation-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.form-group label {
+  font-weight: 600;
+  color: #2d3748;
+  font-size: 0.95rem;
+}
+
+.form-select, .form-input, .form-textarea {
+  padding: 0.75rem;
+  border: 2px solid #e2e8f0;
+  border-radius: 6px;
+  font-size: 0.95rem;
+  transition: border-color 0.2s ease;
+  background: white;
+}
+
+.form-select:focus, .form-input:focus, .form-textarea:focus {
+  outline: none;
+  border-color: #667eea;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.form-textarea {
+  resize: vertical;
+  min-height: 80px;
+}
+
+.radio-group {
+  display: flex;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.radio-group label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: normal;
+  cursor: pointer;
+  padding: 0.5rem;
+  border-radius: 4px;
+  transition: background-color 0.2s ease;
+}
+
+.radio-group label:hover {
+  background-color: #f7fafc;
+}
+
+.radio-group input[type="radio"] {
+  margin: 0;
+  cursor: pointer;
+}
+
+/* 标注记录列表样式 */
+.annotations-list-content {
+  padding: 1.5rem;
+}
+
+.annotations-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2rem;
+  padding: 1.5rem;
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.annotations-header h3 {
+  color: #2d3748;
+  font-size: 1.5rem;
+  margin: 0;
+}
+
+.annotations-table-container {
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  overflow: hidden;
+}
+
+.annotations-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.annotations-table th {
+  background: #f7fafc;
+  color: #2d3748;
+  font-weight: 600;
+  padding: 1rem 0.75rem;
+  text-align: left;
+  border-bottom: 2px solid #e2e8f0;
+  white-space: nowrap;
+}
+
+.annotations-table td {
+  padding: 1rem 0.75rem;
+  border-bottom: 1px solid #e2e8f0;
+  vertical-align: middle;
+}
+
+.annotation-row:hover {
+  background-color: #f7fafc;
+}
+
+.threat-level-badge {
+  display: inline-block;
+  padding: 0.25rem 0.75rem;
+  border-radius: 20px;
+  color: white;
+  font-size: 0.8rem;
+  font-weight: 500;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.threat-level-badge.critical {
+  background-color: #dc2626;
+}
+
+.threat-level-badge.high {
+  background-color: #ea580c;
+}
+
+.threat-level-badge.medium {
+  background-color: #ca8a04;
+}
+
+.threat-level-badge.low {
+  background-color: #16a34a;
+}
+
+.threat-level-badge.info {
+  background-color: #6b7280;
+}
+
+.review-status-badge {
+  display: inline-block;
+  padding: 0.25rem 0.75rem;
+  border-radius: 20px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.review-status-badge.pending {
+  background-color: #fbbf24;
+  color: #92400e;
+}
+
+.review-status-badge.approved {
+  background-color: #10b981;
+  color: white;
+}
+
+.review-status-badge.rejected {
+  background-color: #ef4444;
+  color: white;
+}
+
+.malicious-cell {
+  font-weight: 500;
+}
+
+.view-button {
+  background: #4299e1;
+  color: white;
+  border: none;
+  padding: 0.4rem 0.8rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  transition: background-color 0.2s ease;
+}
+
+.view-button:hover {
+  background: #3182ce;
+}
+
+.annotation-button {
+  background: #10b981;
+  color: white;
+  border: none;
+  padding: 0.4rem 0.8rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  transition: background-color 0.2s ease;
+  margin-left: 0.5rem;
+}
+
+.annotation-button:hover:not(:disabled) {
+  background: #059669;
+}
+
+.annotation-button:disabled {
+  background: #9ca3af;
+  cursor: not-allowed;
+}
+
+/* ================================ */
+/* 威胁事件关联样式 */
+/* ================================ */
+
+.threat-event-correlation-container {
+  padding: 1.5rem;
+  background-color: #f8f9fa;
+  min-height: 100vh;
+}
+
+.threat-event-correlation-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2rem;
+  padding: 1.5rem;
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.threat-event-correlation-header h3 {
+  color: #2d3748;
+  font-size: 1.5rem;
+  margin: 0;
+}
+
+.header-controls {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.correlate-button {
+  background: #8b5cf6;
+  color: white;
+  border: none;
+  padding: 0.75rem 1.5rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.95rem;
+  font-weight: 500;
+  transition: background-color 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.correlate-button:hover:not(:disabled) {
+  background: #7c3aed;
+}
+
+.correlate-button:disabled {
+  background: #9ca3af;
+  cursor: not-allowed;
+}
+
+.description-section {
+  background: #e0f2fe;
+  border: 1px solid #b3e5fc;
+  border-radius: 8px;
+  padding: 1rem 1.5rem;
+  margin-bottom: 2rem;
+}
+
+.description-section p {
+  margin: 0;
+  color: #0277bd;
+  font-weight: 500;
+}
+
+.annotated-alerts-table-container {
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  overflow: hidden;
+}
+
+.annotated-alerts-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.annotated-alerts-table th {
+  background: #f7fafc;
+  color: #2d3748;
+  font-weight: 600;
+  padding: 1rem 0.75rem;
+  text-align: left;
+  border-bottom: 2px solid #e2e8f0;
+  white-space: nowrap;
+}
+
+.annotated-alerts-table td {
+  padding: 1rem 0.75rem;
+  border-bottom: 1px solid #e2e8f0;
+  vertical-align: middle;
+}
+
+.annotation-row:hover {
+  background-color: #f7fafc;
+}
+
+.checkbox-cell {
+  text-align: center;
+  width: 40px;
+}
+
+.checkbox-cell input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+.alert-id-cell {
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  font-size: 0.85rem;
+  color: #4a5568;
+}
+
+.mitre-cell {
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  font-size: 0.85rem;
+  color: #4a5568;
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 关联模态框样式 */
+.correlation-modal {
+  max-width: 600px;
+  width: 90vw;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+
+.correlation-info {
+  background: #f0f8ff;
+  border: 1px solid #bee3f8;
+  border-radius: 8px;
+  padding: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.correlation-info p {
+  margin: 0;
+  color: #2c5282;
+  font-weight: 500;
+}
+
+.correlation-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.save-button {
+  background: #10b981;
+  color: white;
+  border: none;
+  padding: 0.75rem 1.5rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.95rem;
+  font-weight: 500;
+  transition: background-color 0.2s ease;
+}
+
+.save-button:hover:not(:disabled) {
+  background: #059669;
+}
+
+.save-button:disabled {
+  background: #9ca3af;
+  cursor: not-allowed;
+}
+
+.cancel-button {
+  background: #6b7280;
+  color: white;
+  border: none;
+  padding: 0.75rem 1.5rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.95rem;
+  font-weight: 500;
+  transition: background-color 0.2s ease;
+  margin-right: 1rem;
+}
+
+.cancel-button:hover {
+  background: #4b5563;
+}
+
+.close-button {
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  color: #718096;
+  cursor: pointer;
+  padding: 0.25rem;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  transition: all 0.2s ease;
+}
+
+.close-button:hover {
+  background: #e2e8f0;
+  color: #4a5568;
+}
+
+/* ================================ */
+/* 操作按钮样式增强 */
+/* ================================ */
+
+.action-cell {
+  white-space: nowrap;
+}
+
+.detail-button {
+  background: #4299e1;
+  color: white;
+  border: none;
+  padding: 0.4rem 0.8rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  transition: background-color 0.2s ease;
+  margin-right: 0.5rem;
+}
+
+.detail-button:hover {
+  background: #3182ce;
+}
+
+/* ================================ */
+/* 响应式设计 */
+/* ================================ */
+
+@media (max-width: 768px) {
+  .annotation-modal, .correlation-modal {
+    width: 95vw;
+    max-height: 95vh;
+  }
+  
+  .alert-info-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .radio-group {
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+  
+  .header-controls {
+    flex-direction: column;
+    gap: 0.5rem;
+    align-items: stretch;
+  }
+  
+  .annotations-table, .annotated-alerts-table {
+    font-size: 0.8rem;
+  }
+  
+  .annotations-table th, .annotations-table td,
+  .annotated-alerts-table th, .annotated-alerts-table td {
+    padding: 0.5rem 0.4rem;
+  }
+}

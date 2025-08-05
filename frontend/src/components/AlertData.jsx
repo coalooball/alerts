@@ -6,9 +6,11 @@ const AlertData = () => {
   const [activeTab, setActiveTab] = useState('list');
   const [alerts, setAlerts] = useState([]);
   const [filteredAlerts, setFilteredAlerts] = useState([]);
+  const [annotations, setAnnotations] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selectedAlert, setSelectedAlert] = useState(null);
   const [showDetail, setShowDetail] = useState(false);
+  const [showAnnotationModal, setShowAnnotationModal] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [alertsPerPage] = useState(20);
   const [totalAlerts, setTotalAlerts] = useState(0);
@@ -133,6 +135,98 @@ const AlertData = () => {
     }
   };
 
+  // 获取标注记录
+  const fetchAnnotations = async () => {
+    setLoading(true);
+    try {
+      const sessionToken = localStorage.getItem('sessionToken');
+      const response = await fetch('/api/annotations', {
+        headers: {
+          'Authorization': `Bearer ${sessionToken}`
+        }
+      });
+      const data = await response.json();
+      
+      if (data.success) {
+        setAnnotations(data.annotations);
+      } else {
+        console.error('Failed to fetch annotations');
+        setAnnotations([]);
+      }
+    } catch (error) {
+      console.error('Error fetching annotations:', error);
+      setAnnotations([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 打开标注模态框
+  const openAnnotationModal = (alert) => {
+    setSelectedAlert(alert);
+    setAnnotationForm({
+      annotation_type: '',
+      threat_level: '',
+      is_malicious: null,
+      mitre_techniques: '',
+      attack_stage: '',
+      title: '',
+      description: '',
+      notes: ''
+    });
+    setShowAnnotationModal(true);
+  };
+
+  // 关闭标注模态框
+  const closeAnnotationModal = () => {
+    setSelectedAlert(null);
+    setShowAnnotationModal(false);
+    setAnnotationForm({
+      annotation_type: '',
+      threat_level: '',
+      is_malicious: null,
+      mitre_techniques: '',
+      attack_stage: '',
+      title: '',
+      description: '',
+      notes: ''
+    });
+  };
+
+  // 保存标注
+  const saveAnnotation = async (annotationData) => {
+    try {
+      const sessionToken = localStorage.getItem('sessionToken');
+      const response = await fetch('/api/annotations', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${sessionToken}`
+        },
+        body: JSON.stringify({
+          alert_data_id: selectedAlert.id,
+          ...annotationData
+        }),
+      });
+
+      const data = await response.json();
+      
+      if (data.success) {
+        closeAnnotationModal();
+        // 如果当前在标注记录Tab，刷新标注数据
+        if (activeTab === 'annotations') {
+          fetchAnnotations();
+        }
+        alert('标注保存成功！');
+      } else {
+        alert('标注保存失败: ' + data.message);
+      }
+    } catch (error) {
+      console.error('Error saving annotation:', error);
+      alert('保存标注时发生错误');
+    }
+  };
+
   // Server-side filtering is now handled by the backend
   // No client-side filtering needed
 
@@ -162,6 +256,13 @@ const AlertData = () => {
   useEffect(() => {
     fetchAlerts();
   }, [searchFilters, currentPage]);
+
+  // 根据activeTab加载数据
+  useEffect(() => {
+    if (activeTab === 'annotations') {
+      fetchAnnotations();
+    }
+  }, [activeTab]);
 
   const handleRowClick = (alert) => {
     fetchAlertDetail(alert.id);
@@ -335,6 +436,296 @@ const AlertData = () => {
   const paginatedAlerts = filteredAlerts;
   const totalPages = Math.ceil(totalAlerts / alertsPerPage);
   const filteredTotal = totalAlerts; // Backend returns total for current filters
+
+  // 渲染标注记录列表
+  const renderAnnotationsList = () => (
+    <div className="annotations-list-content">
+      <div className="annotations-header">
+        <h3>标注记录列表</h3>
+        <div className="header-controls">
+          <button onClick={fetchAnnotations} className="refresh-button" disabled={loading}>
+            {loading ? '⏳ 加载中...' : '🔄 刷新'}
+          </button>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="loading-indicator">
+          <div className="spinner"></div>
+          <p>正在加载标注记录...</p>
+        </div>
+      ) : (
+        <div className="annotations-table-container">
+          <table className="annotations-table">
+            <thead>
+              <tr>
+                <th>标注时间</th>
+                <th>告警ID</th>
+                <th>标注类型</th>
+                <th>威胁等级</th>
+                <th>恶意性</th>
+                <th>标注人</th>
+                <th>审核状态</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {annotations.length === 0 ? (
+                <tr>
+                  <td colSpan="8" className="no-data">
+                    暂无标注记录
+                  </td>
+                </tr>
+              ) : (
+                annotations.map((annotation, index) => (
+                  <tr key={annotation.id || index} className="annotation-row">
+                    <td className="timestamp-cell">
+                      {formatTimestamp(annotation.annotated_at)}
+                    </td>
+                    <td className="alert-id-cell">{annotation.alert_data_id}</td>
+                    <td className="type-cell">{annotation.annotation_type}</td>
+                    <td className="threat-level-cell">
+                      <span className={`threat-level-badge ${annotation.threat_level}`}>
+                        {annotation.threat_level || '-'}
+                      </span>
+                    </td>
+                    <td className="malicious-cell">
+                      {annotation.is_malicious === null ? '-' : 
+                       annotation.is_malicious ? '✅ 恶意' : '❌ 良性'}
+                    </td>
+                    <td className="annotator-cell">{annotation.annotated_by_username}</td>
+                    <td className="review-status-cell">
+                      <span className={`review-status-badge ${annotation.review_status}`}>
+                        {annotation.review_status === 'pending' ? '待审核' :
+                         annotation.review_status === 'approved' ? '已通过' : '已拒绝'}
+                      </span>
+                    </td>
+                    <td className="action-cell">
+                      <button className="view-button">👁️ 查看</button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+
+  // 标注表单状态
+  const [annotationForm, setAnnotationForm] = useState({
+    annotation_type: '',
+    threat_level: '',
+    is_malicious: null,
+    mitre_techniques: '',
+    attack_stage: '',
+    title: '',
+    description: '',
+    notes: ''
+  });
+
+  // 渲染标注模态框
+  const renderAnnotationModal = () => {
+    if (!showAnnotationModal || !selectedAlert) return null;
+
+    const handleFormChange = (field, value) => {
+      setAnnotationForm(prev => ({
+        ...prev,
+        [field]: value
+      }));
+    };
+
+    const handleSave = () => {
+      const formData = {
+        ...annotationForm,
+        mitre_techniques: annotationForm.mitre_techniques ? 
+          annotationForm.mitre_techniques.split(',').map(t => t.trim()).filter(t => t) : [],
+        is_malicious: annotationForm.is_malicious === 'true' ? true : 
+                     annotationForm.is_malicious === 'false' ? false : null
+      };
+      saveAnnotation(formData);
+    };
+
+    return (
+      <div className="modal-overlay" onClick={closeAnnotationModal}>
+        <div className="modal-content annotation-modal" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-header">
+            <h3>告警标注</h3>
+            <button className="close-button" onClick={closeAnnotationModal}>
+              ✕
+            </button>
+          </div>
+          
+          <div className="modal-body">
+            <div className="alert-info-section">
+              <h4>告警信息</h4>
+              <div className="alert-info-grid">
+                <div className="info-item">
+                  <label>告警ID:</label>
+                  <span>{selectedAlert.id}</span>
+                </div>
+                <div className="info-item">
+                  <label>告警类型:</label>
+                  <span>{selectedAlert.alert_type}</span>
+                </div>
+                <div className="info-item">
+                  <label>设备名称:</label>
+                  <span>{selectedAlert.device_name}</span>
+                </div>
+                <div className="info-item">
+                  <label>严重程度:</label>
+                  <span 
+                    className="severity-badge"
+                    style={{ backgroundColor: getSeverityColor(selectedAlert.severity) }}
+                  >
+                    {getSeverityText(selectedAlert.severity)}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="annotation-form-section">
+              <h4>标注信息</h4>
+              <form className="annotation-form">
+                <div className="form-group">
+                  <label>标注类型:</label>
+                  <select 
+                    className="form-select"
+                    value={annotationForm.annotation_type}
+                    onChange={(e) => handleFormChange('annotation_type', e.target.value)}
+                  >
+                    <option value="">请选择...</option>
+                    <option value="threat_indicator">威胁指标</option>
+                    <option value="false_positive">误报</option>
+                    <option value="benign">良性</option>
+                    <option value="malicious">恶意</option>
+                  </select>
+                </div>
+
+                <div className="form-group">
+                  <label>威胁等级:</label>
+                  <select 
+                    className="form-select"
+                    value={annotationForm.threat_level}
+                    onChange={(e) => handleFormChange('threat_level', e.target.value)}
+                  >
+                    <option value="">请选择...</option>
+                    <option value="critical">严重</option>
+                    <option value="high">高</option>
+                    <option value="medium">中</option>
+                    <option value="low">低</option>
+                    <option value="info">信息</option>
+                  </select>
+                </div>
+
+                <div className="form-group">
+                  <label>恶意性判断:</label>
+                  <div className="radio-group">
+                    <label>
+                      <input 
+                        type="radio" 
+                        name="malicious" 
+                        value="true" 
+                        checked={annotationForm.is_malicious === 'true'}
+                        onChange={(e) => handleFormChange('is_malicious', e.target.value)}
+                      /> 恶意
+                    </label>
+                    <label>
+                      <input 
+                        type="radio" 
+                        name="malicious" 
+                        value="false" 
+                        checked={annotationForm.is_malicious === 'false'}
+                        onChange={(e) => handleFormChange('is_malicious', e.target.value)}
+                      /> 良性
+                    </label>
+                    <label>
+                      <input 
+                        type="radio" 
+                        name="malicious" 
+                        value="" 
+                        checked={annotationForm.is_malicious === '' || annotationForm.is_malicious === null}
+                        onChange={(e) => handleFormChange('is_malicious', e.target.value)}
+                      /> 未知
+                    </label>
+                  </div>
+                </div>
+
+                <div className="form-group">
+                  <label>MITRE 技术:</label>
+                  <input 
+                    type="text" 
+                    className="form-input" 
+                    placeholder="例: T1566, T1059 (逗号分隔)"
+                    value={annotationForm.mitre_techniques}
+                    onChange={(e) => handleFormChange('mitre_techniques', e.target.value)}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label>攻击阶段:</label>
+                  <input 
+                    type="text" 
+                    className="form-input" 
+                    placeholder="例: initial_access, execution"
+                    value={annotationForm.attack_stage}
+                    onChange={(e) => handleFormChange('attack_stage', e.target.value)}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label>标注标题:</label>
+                  <input 
+                    type="text" 
+                    className="form-input" 
+                    placeholder="简要描述..."
+                    value={annotationForm.title}
+                    onChange={(e) => handleFormChange('title', e.target.value)}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label>详细描述:</label>
+                  <textarea 
+                    className="form-textarea" 
+                    placeholder="详细的威胁分析描述..." 
+                    rows="4"
+                    value={annotationForm.description}
+                    onChange={(e) => handleFormChange('description', e.target.value)}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label>备注:</label>
+                  <textarea 
+                    className="form-textarea" 
+                    placeholder="其他备注信息..." 
+                    rows="2"
+                    value={annotationForm.notes}
+                    onChange={(e) => handleFormChange('notes', e.target.value)}
+                  />
+                </div>
+              </form>
+            </div>
+          </div>
+
+          <div className="modal-footer">
+            <button className="cancel-button" onClick={closeAnnotationModal}>
+              取消
+            </button>
+            <button 
+              className="save-button" 
+              onClick={handleSave}
+              disabled={!annotationForm.annotation_type}
+            >
+              保存标注
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   const renderAlertList = () => (
     <div className="alert-list-content">
@@ -520,12 +911,13 @@ const AlertData = () => {
                   <th>告警类型</th>
                   <th>威胁类别</th>
                   <th>Kafka来源</th>
+                  <th>操作</th>
                 </tr>
               </thead>
               <tbody>
                 {paginatedAlerts.length === 0 ? (
                   <tr>
-                    <td colSpan="8" className="no-data">
+                    <td colSpan="9" className="no-data">
                       {hasActiveFilters && filteredTotal === 0 && totalAlerts > 0 ? '没有符合筛选条件的告警数据' : '暂无告警数据'}
                     </td>
                   </tr>
@@ -534,7 +926,6 @@ const AlertData = () => {
                     <tr 
                       key={alert.id || index} 
                       className="alert-row"
-                      onClick={() => handleRowClick(alert)}
                     >
                       <td className="timestamp-cell">
                         {formatTimestamp(alert.create_time)}
@@ -564,6 +955,22 @@ const AlertData = () => {
                       <td className="kafka-source-cell">
                         {alert.kafka_config_name || '-'}
                       </td>
+                      <td className="action-cell">
+                        <button
+                          className="detail-button"
+                          onClick={() => handleRowClick(alert)}
+                          title="查看详情"
+                        >
+                          👁️ 详情
+                        </button>
+                        <button
+                          className="annotation-button"
+                          onClick={() => openAnnotationModal(alert)}
+                          title="添加标注"
+                        >
+                          📝 标注
+                        </button>
+                      </td>
                     </tr>
                   ))
                 )}
@@ -574,6 +981,7 @@ const AlertData = () => {
       )}
 
       {renderDetailModal()}
+      {renderAnnotationModal()}
     </div>
   );
 
@@ -589,6 +997,12 @@ const AlertData = () => {
             📋 告警列表
           </button>
           <button 
+            className={`tab-button ${activeTab === 'annotations' ? 'active' : ''}`}
+            onClick={() => setActiveTab('annotations')}
+          >
+            📝 标注记录
+          </button>
+          <button 
             className={`tab-button ${activeTab === 'analysis' ? 'active' : ''}`}
             onClick={() => setActiveTab('analysis')}
           >
@@ -598,6 +1012,7 @@ const AlertData = () => {
       </div>
 
       {activeTab === 'list' && renderAlertList()}
+      {activeTab === 'annotations' && renderAnnotationsList()}
       {activeTab === 'analysis' && <AlertAnalysis />}
     </div>
   );

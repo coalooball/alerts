@@ -14,6 +14,7 @@ import KafkaConfig from './components/KafkaConfig';
 import ClickHouseConfig from './components/ClickHouseConfig';
 import DataSourceConfig from './components/DataSourceConfig';
 import AlertData from './components/AlertData';
+import AlertAnnotation from './components/AlertAnnotation';
 import ThreatEventList from './components/ThreatEventList';
 import ThreatEventCorrelation from './components/ThreatEventCorrelation';
 import ThreatEventAnalysis from './components/ThreatEventAnalysis';

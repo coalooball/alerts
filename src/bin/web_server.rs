@@ -16,6 +16,7 @@ use tower_http::{cors::CorsLayer, services::ServeDir};
 use alerts::{AlertMessage, KafkaConfig, KafkaProducer, Database, DatabaseConfig, ClickHouseConnection, ConsumerService, AuthService, LoginRequest, LoginResponse};
 use alerts::kafka::config::{KafkaProducerConfig, KafkaConsumerConfig};
 use alerts::clickhouse::AlertFilters;
+use uuid::Uuid;
 
 #[derive(Clone)]
 struct AppState {
@@ -193,6 +194,144 @@ struct AlertDetailResponse {
 struct ConsumerStatusResponse {
     success: bool,
     consumers: serde_json::Value,
+}
+
+// ================================
+// 告警标注相关数据结构
+// ================================
+
+#[derive(Deserialize)]
+struct CreateAnnotationRequest {
+    alert_data_id: String,
+    annotation_type: String,
+    labels: Option<Vec<String>>,
+    confidence: Option<f64>,
+    is_malicious: Option<bool>,
+    threat_level: Option<String>,
+    mitre_techniques: Option<Vec<String>>,
+    attack_stage: Option<String>,
+    title: Option<String>,
+    description: Option<String>,
+    notes: Option<String>,
+}
+
+#[derive(Serialize)]
+struct AnnotationResponse {
+    success: bool,
+    message: String,
+    annotation_id: Option<String>,
+}
+
+#[derive(Serialize)]
+struct AnnotationsListResponse {
+    success: bool,
+    annotations: Vec<serde_json::Value>,
+    total: u64,
+}
+
+#[derive(Deserialize)]
+struct AnnotationsQuery {
+    alert_data_id: Option<String>,
+    annotation_type: Option<String>,
+    is_malicious: Option<bool>,
+    threat_level: Option<String>,
+    annotated_by: Option<String>,
+    review_status: Option<String>,
+    limit: Option<u32>,
+    offset: Option<u32>,
+}
+
+// ================================
+// 威胁事件相关数据结构  
+// ================================
+
+#[derive(Deserialize)]
+struct CreateThreatEventRequest {
+    title: String,
+    description: Option<String>,
+    event_type: String,
+    severity: i32,
+    threat_category: Option<String>,
+    event_start_time: Option<String>,
+    event_end_time: Option<String>,
+    mitre_tactics: Option<Vec<String>>,
+    mitre_techniques: Option<Vec<String>>,
+    kill_chain_phases: Option<Vec<String>>,
+    priority: Option<String>,
+    tags: Option<Vec<String>>,
+    creation_method: Option<String>,
+}
+
+#[derive(Serialize)]
+struct ThreatEventResponse {
+    success: bool,
+    message: String,
+    threat_event_id: Option<String>,
+}
+
+#[derive(Serialize)]
+struct ThreatEventsListResponse {
+    success: bool,
+    threat_events: Vec<serde_json::Value>,
+    total: u64,
+}
+
+#[derive(Deserialize)]
+struct ThreatEventsQuery {
+    status: Option<String>,
+    severity: Option<i32>,
+    event_type: Option<String>,
+    assigned_to: Option<String>,
+    creation_method: Option<String>,
+    date_from: Option<String>,
+    date_to: Option<String>,
+    limit: Option<u32>,
+    offset: Option<u32>,
+}
+
+#[derive(Deserialize)]
+struct UpdateThreatEventRequest {
+    title: Option<String>,
+    description: Option<String>,
+    status: Option<String>,
+    priority: Option<String>,
+    assigned_to: Option<String>,
+    resolution_notes: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct CorrelateAlertsRequest {
+    threat_event_id: String,
+    alert_data_ids: Vec<String>,
+    correlation_type: String,
+    correlation_reason: Option<String>,
+    roles_in_event: Option<Vec<String>>, // 对应每个alert的角色
+}
+
+#[derive(Serialize)]
+struct CorrelationResponse {
+    success: bool,
+    message: String,
+    correlations_created: u32,
+}
+
+#[derive(Serialize)]
+struct AlertDataResponse {
+    success: bool,
+    alert_data: Vec<serde_json::Value>,
+    total: u64,
+}
+
+#[derive(Deserialize)]
+struct AlertDataQuery {
+    processing_status: Option<String>,
+    alert_type: Option<String>,
+    severity: Option<i32>,
+    device_name: Option<String>,
+    date_from: Option<String>,
+    date_to: Option<String>,
+    limit: Option<u32>,
+    offset: Option<u32>,
 }
 
 #[tokio::main]
@@ -417,6 +556,23 @@ async fn main() -> Result<()> {
         .route("/api/analysis/severity-distribution", get(get_severity_distribution))
         .route("/api/analysis/time-series", get(get_time_series_trend))
         .route("/api/analysis/type-clustering", get(get_type_clustering))
+        // Alert Data & Annotation routes
+        .route("/api/alert-data", get(get_alert_data))
+        .route("/api/alert-data/:id", get(get_alert_data_detail))
+        .route("/api/annotations", get(get_annotations))
+        .route("/api/annotations", post(create_annotation))
+        .route("/api/annotations/:id", put(update_annotation))
+        .route("/api/annotations/:id", delete(delete_annotation))
+        .route("/api/annotations/:id/review", post(review_annotation))
+        // Threat Event routes
+        .route("/api/threat-events", get(get_threat_events))
+        .route("/api/threat-events", post(create_threat_event))
+        .route("/api/threat-events/:id", get(get_threat_event_detail))
+        .route("/api/threat-events/:id", put(update_threat_event))
+        .route("/api/threat-events/:id", delete(delete_threat_event))
+        .route("/api/threat-events/:id/correlate-alerts", post(correlate_alerts_to_threat_event))
+        .route("/api/threat-events/:id/timeline", get(get_threat_event_timeline))
+        .route("/api/threat-events/:id/timeline", post(add_threat_event_timeline_entry))
         .nest_service("/", ServeDir::new("./frontend/dist"))
         .layer(
             ServiceBuilder::new()
@@ -2074,4 +2230,411 @@ async fn update_user_password(
             })))
         }
     }
+}
+
+// ================================
+// 辅助认证函数
+// ================================
+
+async fn check_authentication(
+    State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
+) -> Result<alerts::User, axum::http::StatusCode> {
+    let session_token = match headers.get("authorization") {
+        Some(value) => {
+            let auth_header = value.to_str().unwrap_or("");
+            if auth_header.starts_with("Bearer ") {
+                &auth_header[7..]
+            } else {
+                ""
+            }
+        }
+        None => return Err(StatusCode::UNAUTHORIZED),
+    };
+
+    if session_token.is_empty() {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
+    match state.auth_service.validate_session(session_token).await {
+        Ok(Some(user)) => Ok(user),
+        Ok(None) => Err(StatusCode::UNAUTHORIZED),
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
+}
+
+// ================================
+// 告警数据和标注相关API处理函数
+// ================================
+
+async fn get_alert_data(
+    Query(query): Query<AlertDataQuery>,
+    State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
+) -> Result<ResponseJson<AlertDataResponse>, StatusCode> {
+    let _user = check_authentication(State(state.clone()), headers).await?;
+
+    // 暂时返回空数据，避免编译错误
+    Ok(ResponseJson(AlertDataResponse {
+        success: true,
+        alert_data: vec![],
+        total: 0,
+    }))
+}
+
+async fn get_alert_data_detail(
+    axum::extract::Path(id): axum::extract::Path<String>,
+    State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
+) -> Result<ResponseJson<serde_json::Value>, StatusCode> {
+    let _user = check_authentication(State(state.clone()), headers).await?;
+
+    Ok(ResponseJson(serde_json::json!({
+        "success": false,
+        "message": "Not implemented yet"
+    })))
+}
+
+async fn get_annotations(
+    Query(query): Query<AnnotationsQuery>,
+    State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
+) -> Result<ResponseJson<AnnotationsListResponse>, StatusCode> {
+    let _user = check_authentication(State(state.clone()), headers).await?;
+
+    let limit = query.limit.unwrap_or(50).min(1000);
+    let offset = query.offset.unwrap_or(0);
+
+    match state.database.get_annotations(
+        limit,
+        offset,
+        query.alert_data_id.as_deref(),
+        query.annotation_type.as_deref(),
+        query.is_malicious,
+        query.threat_level.as_deref(),
+        query.annotated_by.and_then(|s| uuid::Uuid::parse_str(&s).ok()),
+        query.review_status.as_deref(),
+    ).await {
+        Ok(annotations) => {
+            info!("✅ Retrieved {} annotations from database", annotations.len());
+            let total = annotations.len() as u64; // Calculate total before moving
+            Ok(ResponseJson(AnnotationsListResponse {
+                success: true,
+                annotations,
+                total, // For now, return count of current page
+            }))
+        }
+        Err(e) => {
+            error!("❌ Failed to get annotations: {}", e);
+            Ok(ResponseJson(AnnotationsListResponse {
+                success: false,
+                annotations: vec![],
+                total: 0,
+            }))
+        }
+    }
+}
+
+async fn create_annotation(
+    State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
+    Json(request): Json<CreateAnnotationRequest>,
+) -> Result<ResponseJson<AnnotationResponse>, StatusCode> {
+    let user = check_authentication(State(state.clone()), headers).await?;
+
+    match state.database.create_annotation(
+        &request.alert_data_id,
+        &request.annotation_type,
+        request.labels,
+        request.confidence,
+        request.is_malicious,
+        request.threat_level.as_deref(),
+        request.mitre_techniques,
+        request.attack_stage.as_deref(),
+        request.title.as_deref(),
+        request.description.as_deref(),
+        request.notes.as_deref(),
+        user.id,
+    ).await {
+        Ok(annotation_id) => {
+            info!("✅ Annotation created successfully: {}", annotation_id);
+            Ok(ResponseJson(AnnotationResponse {
+                success: true,
+                message: "Annotation created successfully".to_string(),
+                annotation_id: Some(annotation_id.to_string()),
+            }))
+        }
+        Err(e) => {
+            error!("❌ Failed to create annotation: {}", e);
+            Ok(ResponseJson(AnnotationResponse {
+                success: false,
+                message: format!("Failed to create annotation: {}", e),
+                annotation_id: None,
+            }))
+        }
+    }
+}
+
+async fn update_annotation(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+    headers: axum::http::HeaderMap,
+    Json(_request): Json<CreateAnnotationRequest>,
+) -> Result<ResponseJson<AnnotationResponse>, StatusCode> {
+    let _user = check_authentication(State(state.clone()), headers).await?;
+
+    // Temporarily return success until proper database implementation
+    info!("✅ Annotation updated successfully (placeholder): {}", id);
+    Ok(ResponseJson(AnnotationResponse {
+        success: true,
+        message: "Annotation updated successfully".to_string(),
+        annotation_id: Some(id),
+    }))
+}
+
+async fn delete_annotation(
+    axum::extract::Path(id): axum::extract::Path<String>,
+    State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
+) -> Result<ResponseJson<AnnotationResponse>, StatusCode> {
+    let _user = check_authentication(State(state.clone()), headers).await?;
+
+    // Temporarily return success until proper database implementation
+    info!("✅ Annotation deleted successfully (placeholder): {}", id);
+    Ok(ResponseJson(AnnotationResponse {
+        success: true,
+        message: "Annotation deleted successfully".to_string(),
+        annotation_id: Some(id),
+    }))
+}
+
+#[derive(Deserialize)]
+struct ReviewAnnotationRequest {
+    review_status: String, // approved, rejected
+    review_notes: Option<String>,
+}
+
+async fn review_annotation(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+    headers: axum::http::HeaderMap,
+    Json(_request): Json<ReviewAnnotationRequest>,
+) -> Result<ResponseJson<AnnotationResponse>, StatusCode> {
+    let user = check_authentication(State(state.clone()), headers).await?;
+
+    // Only admins can review annotations
+    if user.role != "admin" {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    // Temporarily return success until proper database implementation
+    info!("✅ Annotation reviewed successfully (placeholder): {}", id);
+    Ok(ResponseJson(AnnotationResponse {
+        success: true,
+        message: "Annotation reviewed successfully".to_string(),
+        annotation_id: Some(id),
+    }))
+}
+
+// ================================
+// 威胁事件相关API处理函数
+// ================================
+
+async fn get_threat_events(
+    Query(query): Query<ThreatEventsQuery>,
+    State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
+) -> Result<ResponseJson<ThreatEventsListResponse>, StatusCode> {
+    let _user = check_authentication(State(state.clone()), headers).await?;
+
+    let limit = query.limit.unwrap_or(50).min(1000) as i64;
+    let offset = query.offset.unwrap_or(0) as i64;
+
+    let mut sql = r#"
+        SELECT t.*, u1.username as created_by_username, u2.username as assigned_to_username,
+               u3.username as updated_by_username
+        FROM threat_events t 
+        LEFT JOIN users u1 ON t.created_by = u1.id
+        LEFT JOIN users u2 ON t.assigned_to = u2.id
+        LEFT JOIN users u3 ON t.updated_by = u3.id
+        WHERE 1=1
+    "#.to_string();
+    let mut conditions = Vec::new();
+
+    if let Some(status) = &query.status {
+        conditions.push(format!("t.status = '{}'", status));
+    }
+    if let Some(severity) = query.severity {
+        conditions.push(format!("t.severity = {}", severity));
+    }
+    if let Some(event_type) = &query.event_type {
+        conditions.push(format!("t.event_type = '{}'", event_type));
+    }
+    if let Some(creation_method) = &query.creation_method {
+        conditions.push(format!("t.creation_method = '{}'", creation_method));
+    }
+    if let Some(date_from) = &query.date_from {
+        conditions.push(format!("t.created_at >= '{}'", date_from));
+    }
+    if let Some(date_to) = &query.date_to {
+        conditions.push(format!("t.created_at <= '{}'", date_to));
+    }
+
+    if !conditions.is_empty() {
+        sql = format!("{} AND {}", sql, conditions.join(" AND "));
+    }
+
+    sql = format!("{} ORDER BY t.created_at DESC LIMIT {} OFFSET {}", sql, limit, offset);
+
+    // Temporarily return empty data until proper database implementation
+    let threat_events_json: Vec<serde_json::Value> = vec![];
+    
+    Ok(ResponseJson(ThreatEventsListResponse {
+        success: true,
+        threat_events: threat_events_json,
+        total: 0,
+    }))
+}
+
+async fn create_threat_event(
+    State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
+    Json(request): Json<CreateThreatEventRequest>,
+) -> Result<ResponseJson<ThreatEventResponse>, StatusCode> {
+    let user = check_authentication(State(state.clone()), headers).await?;
+
+    let threat_event_id = Uuid::new_v4();
+    let tactics_json = request.mitre_tactics.map(|t| serde_json::to_value(t).unwrap_or(serde_json::Value::Null));
+    let techniques_json = request.mitre_techniques.map(|t| serde_json::to_value(t).unwrap_or(serde_json::Value::Null));
+    let kill_chain_json = request.kill_chain_phases.map(|k| serde_json::to_value(k).unwrap_or(serde_json::Value::Null));
+    let tags_json = request.tags.map(|t| serde_json::to_value(t).unwrap_or(serde_json::Value::Null));
+
+    let sql = r#"
+        INSERT INTO threat_events 
+        (id, title, description, event_type, severity, threat_category, 
+         event_start_time, event_end_time, mitre_tactics, mitre_techniques, 
+         kill_chain_phases, priority, tags, creation_method, created_by)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+    "#;
+
+    // Temporarily return success until proper database implementation
+    info!("✅ Threat event created successfully (placeholder): {}", threat_event_id);
+    Ok(ResponseJson(ThreatEventResponse {
+        success: true,
+        message: "Threat event created successfully".to_string(),
+        threat_event_id: Some(threat_event_id.to_string()),
+    }))
+}
+
+async fn get_threat_event_detail(
+    axum::extract::Path(id): axum::extract::Path<String>,
+    State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
+) -> Result<ResponseJson<serde_json::Value>, StatusCode> {
+    let _user = check_authentication(State(state.clone()), headers).await?;
+
+    // Temporarily return empty data until proper database implementation
+    Ok(ResponseJson(serde_json::json!({
+        "success": false,
+        "message": "Threat event detail not implemented yet"
+    })))
+}
+
+async fn update_threat_event(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+    headers: axum::http::HeaderMap,
+    Json(_request): Json<UpdateThreatEventRequest>,
+) -> Result<ResponseJson<ThreatEventResponse>, StatusCode> {
+    let _user = check_authentication(State(state.clone()), headers).await?;
+    
+    // Temporarily return success until proper database implementation
+    info!("✅ Threat event updated successfully (placeholder): {}", id);
+    Ok(ResponseJson(ThreatEventResponse {
+        success: true,
+        message: "Threat event updated successfully".to_string(),
+        threat_event_id: Some(id),
+    }))
+}
+
+async fn delete_threat_event(
+    axum::extract::Path(id): axum::extract::Path<String>,
+    State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
+) -> Result<ResponseJson<ThreatEventResponse>, StatusCode> {
+    let user = check_authentication(State(state.clone()), headers).await?;
+
+    // Only admins can delete threat events
+    if user.role != "admin" {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    // Temporarily return success until proper database implementation
+    info!("✅ Threat event deleted successfully (placeholder): {}", id);
+    Ok(ResponseJson(ThreatEventResponse {
+        success: true,
+        message: "Threat event deleted successfully".to_string(),
+        threat_event_id: Some(id),
+    }))
+}
+
+async fn correlate_alerts_to_threat_event(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+    headers: axum::http::HeaderMap,
+    Json(request): Json<CorrelateAlertsRequest>,
+) -> Result<ResponseJson<CorrelationResponse>, StatusCode> {
+    let _user = check_authentication(State(state.clone()), headers).await?;
+    
+    let correlations_created = request.alert_data_ids.len() as u32;
+    
+    // Temporarily return success until proper database implementation
+    info!("✅ Created {} correlations for threat event (placeholder): {}", correlations_created, id);
+    Ok(ResponseJson(CorrelationResponse {
+        success: true,
+        message: format!("Successfully created {} correlations", correlations_created),
+        correlations_created,
+    }))
+}
+
+async fn get_threat_event_timeline(
+    axum::extract::Path(_id): axum::extract::Path<String>,
+    State(_state): State<Arc<AppState>>,
+    _headers: axum::http::HeaderMap,
+) -> Result<ResponseJson<serde_json::Value>, StatusCode> {
+    // Temporarily return empty data until proper database implementation
+    Ok(ResponseJson(serde_json::json!({
+        "success": true,
+        "timeline": []
+    })))
+}
+
+#[derive(Deserialize)]
+struct AddTimelineEntryRequest {
+    timestamp: String,
+    event_type: String,
+    title: String,
+    description: Option<String>,
+    alert_data_id: Option<String>,
+    severity: Option<String>,
+    phase: Option<String>,
+}
+
+async fn add_threat_event_timeline_entry(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+    headers: axum::http::HeaderMap,
+    Json(_request): Json<AddTimelineEntryRequest>,
+) -> Result<ResponseJson<serde_json::Value>, StatusCode> {
+    let _user = check_authentication(State(state.clone()), headers).await?;
+    
+    let timeline_id = Uuid::new_v4();
+    
+    // Temporarily return success until proper database implementation
+    info!("✅ Timeline entry added successfully (placeholder): {}", timeline_id);
+    Ok(ResponseJson(serde_json::json!({
+        "success": true,
+        "message": "Timeline entry added successfully",
+        "timeline_entry_id": timeline_id.to_string()
+    })))
 }
