@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import '../App.css';
+import AlertAnalysis from './AlertAnalysis';
 
 const AlertData = () => {
+  const [activeTab, setActiveTab] = useState('list');
   const [alerts, setAlerts] = useState([]);
   const [filteredAlerts, setFilteredAlerts] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -334,17 +336,17 @@ const AlertData = () => {
   const totalPages = Math.ceil(totalAlerts / alertsPerPage);
   const filteredTotal = totalAlerts; // Backend returns total for current filters
 
-  return (
-    <div className="alert-data-container">
+  const renderAlertList = () => (
+    <div className="alert-list-content">
       <div className="alert-data-header">
-        <h2>告警数据 
+        <h3>告警列表 
           <span className="total-alerts-count">
             (总数: {totalAlerts.toLocaleString('zh-CN')}
             {hasActiveFilters && filteredTotal !== totalAlerts && (
               <span>, 筛选后: {filteredTotal.toLocaleString('zh-CN')}</span>
             )})
           </span>
-        </h2>
+        </h3>
         <div className="header-controls">
           <div className="pagination">
             <button 
@@ -568,11 +570,35 @@ const AlertData = () => {
               </tbody>
             </table>
           </div>
-
         </>
       )}
 
       {renderDetailModal()}
+    </div>
+  );
+
+  return (
+    <div className="alert-data-container">
+      <div className="alert-data-main-header">
+        <h2>🚨 告警数据</h2>
+        <div className="alert-data-tabs">
+          <button 
+            className={`tab-button ${activeTab === 'list' ? 'active' : ''}`}
+            onClick={() => setActiveTab('list')}
+          >
+            📋 告警列表
+          </button>
+          <button 
+            className={`tab-button ${activeTab === 'analysis' ? 'active' : ''}`}
+            onClick={() => setActiveTab('analysis')}
+          >
+            📊 告警分析
+          </button>
+        </div>
+      </div>
+
+      {activeTab === 'list' && renderAlertList()}
+      {activeTab === 'analysis' && <AlertAnalysis />}
     </div>
   );
 };

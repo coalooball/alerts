@@ -14,7 +14,6 @@ import KafkaConfig from './components/KafkaConfig';
 import ClickHouseConfig from './components/ClickHouseConfig';
 import DataSourceConfig from './components/DataSourceConfig';
 import AlertData from './components/AlertData';
-import AlertAnalysis from './components/AlertAnalysis';
 import ThreatEventList from './components/ThreatEventList';
 import ThreatEventCorrelation from './components/ThreatEventCorrelation';
 import ThreatEventAnalysis from './components/ThreatEventAnalysis';
@@ -208,11 +207,6 @@ const AppContent = () => {
                 🚨 告警数据
               </button>
             </li>
-            <li className={activeView === 'analysis' ? 'active' : ''}>
-              <button onClick={() => setActiveView('analysis')}>
-                📊 告警分析
-              </button>
-            </li>
             <li className={activeView === 'threats' ? 'active' : ''}>
               <button onClick={() => setActiveView('threats')}>
                 🛡️ 威胁事件
@@ -248,7 +242,6 @@ const AppContent = () => {
             />
           )}
           {activeView === 'alerts' && <AlertData />}
-          {activeView === 'analysis' && <AlertAnalysis />}
           {activeView === 'threats' && renderThreatEventPage()}
           {activeView === 'logs' && <Logs />}
           {activeView === 'config' && renderConfigPage()}
