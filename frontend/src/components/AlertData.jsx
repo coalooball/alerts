@@ -3,6 +3,7 @@ import '../App.css';
 
 const AlertData = () => {
   const [alerts, setAlerts] = useState([]);
+  const [filteredAlerts, setFilteredAlerts] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selectedAlert, setSelectedAlert] = useState(null);
   const [showDetail, setShowDetail] = useState(false);
@@ -15,10 +16,22 @@ const AlertData = () => {
     return saved ? parseInt(saved, 10) : 0;
   });
   const [autoRefreshTimer, setAutoRefreshTimer] = useState(null);
+  const [searchFilters, setSearchFilters] = useState({
+    deviceName: '',
+    deviceIp: '',
+    alertType: '',
+    threatCategory: '',
+    severity: '',
+    dataType: '',
+    kafkaSource: '',
+    dateFrom: '',
+    dateTo: ''
+  });
 
+  // Initial load
   useEffect(() => {
     fetchAlerts();
-  }, [currentPage]);
+  }, []);
 
   // Save refresh interval to localStorage when it changes
   useEffect(() => {
@@ -45,21 +58,57 @@ const AlertData = () => {
   const fetchAlerts = async () => {
     setLoading(true);
     try {
-      const offset = (currentPage - 1) * alertsPerPage;
-      const response = await fetch(`/api/alerts?limit=${alertsPerPage}&offset=${offset}`);
+      // Build query parameters for backend filtering
+      const params = new URLSearchParams();
+      params.append('limit', alertsPerPage.toString());
+      params.append('offset', ((currentPage - 1) * alertsPerPage).toString());
+      
+      // Add search filters to query parameters
+      if (searchFilters.deviceName) {
+        params.append('device_name', searchFilters.deviceName);
+      }
+      if (searchFilters.deviceIp) {
+        params.append('device_ip', searchFilters.deviceIp);
+      }
+      if (searchFilters.alertType) {
+        params.append('alert_type', searchFilters.alertType);
+      }
+      if (searchFilters.threatCategory) {
+        params.append('threat_category', searchFilters.threatCategory);
+      }
+      if (searchFilters.severity) {
+        params.append('severity', searchFilters.severity);
+      }
+      if (searchFilters.dataType) {
+        params.append('data_type', searchFilters.dataType);
+      }
+      if (searchFilters.kafkaSource) {
+        params.append('kafka_source', searchFilters.kafkaSource);
+      }
+      if (searchFilters.dateFrom) {
+        params.append('date_from', searchFilters.dateFrom);
+      }
+      if (searchFilters.dateTo) {
+        params.append('date_to', searchFilters.dateTo);
+      }
+      
+      const response = await fetch(`/api/alerts?${params.toString()}`);
       const data = await response.json();
       
       if (data.success) {
         setAlerts(data.alerts);
-        setTotalAlerts(data.total || 0);
+        setFilteredAlerts(data.alerts);
+        setTotalAlerts(data.total || data.alerts.length);
       } else {
         console.error('Failed to fetch alerts');
         setAlerts([]);
+        setFilteredAlerts([]);
         setTotalAlerts(0);
       }
     } catch (error) {
       console.error('Error fetching alerts:', error);
       setAlerts([]);
+      setFilteredAlerts([]);
       setTotalAlerts(0);
     } finally {
       setLoading(false);
@@ -81,6 +130,36 @@ const AlertData = () => {
       console.error('Error fetching alert detail:', error);
     }
   };
+
+  // Server-side filtering is now handled by the backend
+  // No client-side filtering needed
+
+  const resetFilters = () => {
+    setSearchFilters({
+      deviceName: '',
+      deviceIp: '',
+      alertType: '',
+      threatCategory: '',
+      severity: '',
+      dataType: '',
+      kafkaSource: '',
+      dateFrom: '',
+      dateTo: ''
+    });
+    setCurrentPage(1);
+  };
+
+  const handleFilterChange = (field, value) => {
+    setSearchFilters(prev => ({
+      ...prev,
+      [field]: value
+    }));
+  };
+
+  // Fetch new data when search filters change (backend filtering)
+  useEffect(() => {
+    fetchAlerts();
+  }, [searchFilters, currentPage]);
 
   const handleRowClick = (alert) => {
     fetchAlertDetail(alert.id);
@@ -239,10 +318,33 @@ const AlertData = () => {
   };
 
 
+  // Check if any filters are active
+  const hasActiveFilters = searchFilters.deviceName || 
+                          searchFilters.deviceIp || 
+                          searchFilters.alertType || 
+                          searchFilters.threatCategory || 
+                          searchFilters.severity || 
+                          searchFilters.dataType || 
+                          searchFilters.kafkaSource || 
+                          searchFilters.dateFrom || 
+                          searchFilters.dateTo;
+
+  // Backend handles pagination, so we display the returned alerts directly
+  const paginatedAlerts = filteredAlerts;
+  const totalPages = Math.ceil(totalAlerts / alertsPerPage);
+  const filteredTotal = totalAlerts; // Backend returns total for current filters
+
   return (
     <div className="alert-data-container">
       <div className="alert-data-header">
-        <h2>告警数据 <span className="total-alerts-count">(总数: {totalAlerts.toLocaleString('zh-CN')})</span></h2>
+        <h2>告警数据 
+          <span className="total-alerts-count">
+            (总数: {totalAlerts.toLocaleString('zh-CN')}
+            {hasActiveFilters && filteredTotal !== totalAlerts && (
+              <span>, 筛选后: {filteredTotal.toLocaleString('zh-CN')}</span>
+            )})
+          </span>
+        </h2>
         <div className="header-controls">
           <div className="pagination">
             <button 
@@ -252,10 +354,10 @@ const AlertData = () => {
             >
               上一页
             </button>
-            <span className="page-info">第 {currentPage} 页</span>
+            <span className="page-info">第 {currentPage} 页 / 共 {totalPages} 页</span>
             <button 
               onClick={() => setCurrentPage(prev => prev + 1)}
-              disabled={alerts.length < alertsPerPage}
+              disabled={currentPage >= totalPages}
               className="pagination-button"
             >
               下一页
@@ -282,6 +384,121 @@ const AlertData = () => {
         </div>
       </div>
 
+      {/* Search Filters */}
+      <div className="search-filters-container">
+        <div className="search-filters-header">
+          <h3>搜索筛选</h3>
+          <button onClick={resetFilters} className="reset-filters-button">
+            🔄 重置筛选
+          </button>
+        </div>
+        
+        <div className="search-filters-grid">
+          <div className="filter-group">
+            <label>设备名称:</label>
+            <input
+              type="text"
+              placeholder="搜索设备名称..."
+              value={searchFilters.deviceName}
+              onChange={(e) => handleFilterChange('deviceName', e.target.value)}
+              className="search-input"
+            />
+          </div>
+
+          <div className="filter-group">
+            <label>设备IP:</label>
+            <input
+              type="text"
+              placeholder="搜索IP地址..."
+              value={searchFilters.deviceIp}
+              onChange={(e) => handleFilterChange('deviceIp', e.target.value)}
+              className="search-input"
+            />
+          </div>
+
+          <div className="filter-group">
+            <label>告警类型:</label>
+            <input
+              type="text"
+              placeholder="搜索告警类型..."
+              value={searchFilters.alertType}
+              onChange={(e) => handleFilterChange('alertType', e.target.value)}
+              className="search-input"
+            />
+          </div>
+
+          <div className="filter-group">
+            <label>威胁类别:</label>
+            <input
+              type="text"
+              placeholder="搜索威胁类别..."
+              value={searchFilters.threatCategory}
+              onChange={(e) => handleFilterChange('threatCategory', e.target.value)}
+              className="search-input"
+            />
+          </div>
+
+          <div className="filter-group">
+            <label>严重程度:</label>
+            <select
+              value={searchFilters.severity}
+              onChange={(e) => handleFilterChange('severity', e.target.value)}
+              className="search-select"
+            >
+              <option value="">全部</option>
+              <option value="1">严重</option>
+              <option value="2">高</option>
+              <option value="3">中</option>
+              <option value="4">低</option>
+            </select>
+          </div>
+
+          <div className="filter-group">
+            <label>数据类型:</label>
+            <select
+              value={searchFilters.dataType}
+              onChange={(e) => handleFilterChange('dataType', e.target.value)}
+              className="search-select"
+            >
+              <option value="">全部</option>
+              <option value="edr">EDR</option>
+              <option value="ngav">NGAV</option>
+            </select>
+          </div>
+
+          <div className="filter-group">
+            <label>Kafka来源:</label>
+            <input
+              type="text"
+              placeholder="搜索Kafka来源..."
+              value={searchFilters.kafkaSource}
+              onChange={(e) => handleFilterChange('kafkaSource', e.target.value)}
+              className="search-input"
+            />
+          </div>
+
+          <div className="filter-group">
+            <label>开始日期:</label>
+            <input
+              type="datetime-local"
+              value={searchFilters.dateFrom}
+              onChange={(e) => handleFilterChange('dateFrom', e.target.value)}
+              className="search-input"
+            />
+          </div>
+
+          <div className="filter-group">
+            <label>结束日期:</label>
+            <input
+              type="datetime-local"
+              value={searchFilters.dateTo}
+              onChange={(e) => handleFilterChange('dateTo', e.target.value)}
+              className="search-input"
+            />
+          </div>
+        </div>
+      </div>
+
       {loading ? (
         <div className="loading-indicator">
           <div className="spinner"></div>
@@ -304,14 +521,14 @@ const AlertData = () => {
                 </tr>
               </thead>
               <tbody>
-                {alerts.length === 0 ? (
+                {paginatedAlerts.length === 0 ? (
                   <tr>
                     <td colSpan="8" className="no-data">
-                      暂无告警数据
+                      {hasActiveFilters && filteredTotal === 0 && totalAlerts > 0 ? '没有符合筛选条件的告警数据' : '暂无告警数据'}
                     </td>
                   </tr>
                 ) : (
-                  alerts.map((alert, index) => (
+                  paginatedAlerts.map((alert, index) => (
                     <tr 
                       key={alert.id || index} 
                       className="alert-row"

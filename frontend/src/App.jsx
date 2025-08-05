@@ -12,6 +12,10 @@ import KafkaConfig from './components/KafkaConfig';
 import ClickHouseConfig from './components/ClickHouseConfig';
 import DataSourceConfig from './components/DataSourceConfig';
 import AlertData from './components/AlertData';
+import AlertAnalysis from './components/AlertAnalysis';
+import ThreatEventList from './components/ThreatEventList';
+import ThreatEventCorrelation from './components/ThreatEventCorrelation';
+import ThreatEventAnalysis from './components/ThreatEventAnalysis';
 import Logs from './components/Logs';
 import TestModal from './components/TestModal';
 import Tooltip from './components/Tooltip';
@@ -19,6 +23,7 @@ import Tooltip from './components/Tooltip';
 function App() {
   const [activeView, setActiveView] = useState('home');
   const [configTab, setConfigTab] = useState('kafka');
+  const [threatEventTab, setThreatEventTab] = useState('list');
 
   // 使用自定义hooks
   const {
@@ -123,6 +128,38 @@ function App() {
     </div>
   );
 
+  const renderThreatEventPage = () => (
+    <div className="threat-event-content">
+      <div className="threat-event-header">
+        <h2>威胁事件</h2>
+        <div className="threat-event-tabs">
+          <button 
+            className={`tab-button ${threatEventTab === 'list' ? 'active' : ''}`}
+            onClick={() => setThreatEventTab('list')}
+          >
+            威胁事件列表
+          </button>
+          <button 
+            className={`tab-button ${threatEventTab === 'correlation' ? 'active' : ''}`}
+            onClick={() => setThreatEventTab('correlation')}
+          >
+            威胁事件关联
+          </button>
+          <button 
+            className={`tab-button ${threatEventTab === 'analysis' ? 'active' : ''}`}
+            onClick={() => setThreatEventTab('analysis')}
+          >
+            威胁事件分析
+          </button>
+        </div>
+      </div>
+
+      {threatEventTab === 'list' && <ThreatEventList />}
+      {threatEventTab === 'correlation' && <ThreatEventCorrelation />}
+      {threatEventTab === 'analysis' && <ThreatEventAnalysis />}
+    </div>
+  );
+
   return (
     <div className="app">
       <header className="app-header">
@@ -140,6 +177,16 @@ function App() {
             <li className={activeView === 'alerts' ? 'active' : ''}>
               <button onClick={() => setActiveView('alerts')}>
                 🚨 告警数据
+              </button>
+            </li>
+            <li className={activeView === 'analysis' ? 'active' : ''}>
+              <button onClick={() => setActiveView('analysis')}>
+                📊 告警分析
+              </button>
+            </li>
+            <li className={activeView === 'threats' ? 'active' : ''}>
+              <button onClick={() => setActiveView('threats')}>
+                🛡️ 威胁事件
               </button>
             </li>
             <li className={activeView === 'logs' ? 'active' : ''}>
@@ -165,6 +212,8 @@ function App() {
             />
           )}
           {activeView === 'alerts' && <AlertData />}
+          {activeView === 'analysis' && <AlertAnalysis />}
+          {activeView === 'threats' && renderThreatEventPage()}
           {activeView === 'logs' && <Logs />}
           {activeView === 'config' && renderConfigPage()}
         </main>

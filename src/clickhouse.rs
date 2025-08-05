@@ -7,6 +7,19 @@ use std::fs;
 
 use crate::{edr_alert::EdrAlert, ngav_alert::NgavAlert, database::ClickHouseConfigRow};
 
+#[derive(Debug)]
+pub struct AlertFilters {
+    pub device_name: Option<String>,
+    pub device_ip: Option<String>,
+    pub alert_type: Option<String>,
+    pub threat_category: Option<String>,
+    pub severity: Option<u32>,
+    pub data_type: Option<String>,
+    pub kafka_source: Option<String>,
+    pub date_from: Option<String>,
+    pub date_to: Option<String>,
+}
+
 // Helper function to parse ISO 8601 datetime strings and format for ClickHouse DateTime64(3)
 fn parse_datetime_for_clickhouse(datetime_str: &str) -> String {
     // Try parsing with Z suffix first
@@ -565,12 +578,205 @@ impl ClickHouseConnection {
         }
     }
 
+    pub async fn get_common_alerts_with_filters(&self, limit: u32, offset: u32, filters: &AlertFilters) -> Result<Vec<CommonAlert>> {
+        let mut query = String::from(
+            r#"SELECT 
+                toString(id) as id, 
+                toString(original_id) as original_id, 
+                toString(data_type) as data_type, 
+                toString(create_time) as create_time,
+                device_id, 
+                toString(device_name) as device_name, 
+                toString(device_os) as device_os,
+                toString(device_internal_ip) as device_internal_ip, 
+                toString(device_external_ip) as device_external_ip, 
+                toString(org_key) as org_key,
+                severity, 
+                toString(alert_type) as alert_type, 
+                toString(threat_category) as threat_category, 
+                toString(device_username) as device_username,
+                toString(raw_data) as raw_data, 
+                toString(processed_time) as processed_time,
+                toString(kafka_topic) as kafka_topic, 
+                kafka_partition, kafka_offset, 
+                toString(kafka_config_name) as kafka_config_name
+            FROM alerts.common_alerts"#
+        );
+
+        let mut conditions = Vec::new();
+
+        // Add filter conditions
+        if let Some(ref device_name) = filters.device_name {
+            if !device_name.is_empty() {
+                conditions.push(format!("lower(device_name) LIKE lower('%{}%')", device_name.replace("'", "''")));
+            }
+        }
+
+        if let Some(ref device_ip) = filters.device_ip {
+            if !device_ip.is_empty() {
+                conditions.push(format!(
+                    "(lower(device_internal_ip) LIKE lower('%{}%') OR lower(device_external_ip) LIKE lower('%{}%'))", 
+                    device_ip.replace("'", "''"), device_ip.replace("'", "''")
+                ));
+            }
+        }
+
+        if let Some(ref alert_type) = filters.alert_type {
+            if !alert_type.is_empty() {
+                conditions.push(format!("lower(alert_type) LIKE lower('%{}%')", alert_type.replace("'", "''")));
+            }
+        }
+
+        if let Some(ref threat_category) = filters.threat_category {
+            if !threat_category.is_empty() {
+                conditions.push(format!("lower(threat_category) LIKE lower('%{}%')", threat_category.replace("'", "''")));
+            }
+        }
+
+        if let Some(severity) = filters.severity {
+            conditions.push(format!("severity = {}", severity));
+        }
+
+        if let Some(ref data_type) = filters.data_type {
+            if !data_type.is_empty() {
+                conditions.push(format!("lower(data_type) = lower('{}')", data_type.replace("'", "''")));
+            }
+        }
+
+        if let Some(ref kafka_source) = filters.kafka_source {
+            if !kafka_source.is_empty() {
+                conditions.push(format!("lower(kafka_config_name) LIKE lower('%{}%')", kafka_source.replace("'", "''")));
+            }
+        }
+
+        if let Some(ref date_from) = filters.date_from {
+            if !date_from.is_empty() {
+                conditions.push(format!("create_time >= '{}'", date_from.replace("'", "''")));
+            }
+        }
+
+        if let Some(ref date_to) = filters.date_to {
+            if !date_to.is_empty() {
+                conditions.push(format!("create_time <= '{}'", date_to.replace("'", "''")));
+            }
+        }
+
+        // Add WHERE clause if we have conditions
+        if !conditions.is_empty() {
+            query.push_str(" WHERE ");
+            query.push_str(&conditions.join(" AND "));
+        }
+
+        // Add ordering and pagination
+        query.push_str(&format!(
+            " ORDER BY processed_time DESC, id DESC LIMIT {} OFFSET {}",
+            limit, offset
+        ));
+
+        log::debug!("Executing filtered query: {}", query);
+        
+        // Try to fetch data with error handling
+        match self.client.query(&query).fetch_all().await {
+            Ok(alerts) => {
+                log::info!("Successfully fetched {} filtered alerts from ClickHouse", alerts.len());
+                // Clean all alerts to ensure valid UTF-8
+                let cleaned_alerts: Vec<CommonAlert> = alerts.into_iter()
+                    .map(|alert| self.clean_common_alert(alert))
+                    .collect();
+                Ok(cleaned_alerts)
+            },
+            Err(e) => {
+                log::error!("Failed to fetch filtered alerts from ClickHouse: {}", e);
+                // Fall back to unfiltered query if filtering fails
+                self.get_common_alerts(limit, offset).await
+            }
+        }
+    }
+
     pub async fn get_alerts_count(&self) -> Result<u64> {
         let query = "SELECT count(*) as count FROM alerts.common_alerts";
         
         let count: u64 = self.client.query(query).fetch_one().await?;
         
         Ok(count)
+    }
+
+    pub async fn get_filtered_alerts_count(&self, filters: &AlertFilters) -> Result<u64> {
+        let mut query = String::from("SELECT count(*) as count FROM alerts.common_alerts");
+        let mut conditions = Vec::new();
+
+        // Add the same filter conditions as in get_common_alerts_with_filters
+        if let Some(ref device_name) = filters.device_name {
+            if !device_name.is_empty() {
+                conditions.push(format!("lower(device_name) LIKE lower('%{}%')", device_name.replace("'", "''")));
+            }
+        }
+
+        if let Some(ref device_ip) = filters.device_ip {
+            if !device_ip.is_empty() {
+                conditions.push(format!(
+                    "(lower(device_internal_ip) LIKE lower('%{}%') OR lower(device_external_ip) LIKE lower('%{}%'))", 
+                    device_ip.replace("'", "''"), device_ip.replace("'", "''")
+                ));
+            }
+        }
+
+        if let Some(ref alert_type) = filters.alert_type {
+            if !alert_type.is_empty() {
+                conditions.push(format!("lower(alert_type) LIKE lower('%{}%')", alert_type.replace("'", "''")));
+            }
+        }
+
+        if let Some(ref threat_category) = filters.threat_category {
+            if !threat_category.is_empty() {
+                conditions.push(format!("lower(threat_category) LIKE lower('%{}%')", threat_category.replace("'", "''")));
+            }
+        }
+
+        if let Some(severity) = filters.severity {
+            conditions.push(format!("severity = {}", severity));
+        }
+
+        if let Some(ref data_type) = filters.data_type {
+            if !data_type.is_empty() {
+                conditions.push(format!("lower(data_type) = lower('{}')", data_type.replace("'", "''")));
+            }
+        }
+
+        if let Some(ref kafka_source) = filters.kafka_source {
+            if !kafka_source.is_empty() {
+                conditions.push(format!("lower(kafka_config_name) LIKE lower('%{}%')", kafka_source.replace("'", "''")));
+            }
+        }
+
+        if let Some(ref date_from) = filters.date_from {
+            if !date_from.is_empty() {
+                conditions.push(format!("create_time >= '{}'", date_from.replace("'", "''")));
+            }
+        }
+
+        if let Some(ref date_to) = filters.date_to {
+            if !date_to.is_empty() {
+                conditions.push(format!("create_time <= '{}'", date_to.replace("'", "''")));
+            }
+        }
+
+        // Add WHERE clause if we have conditions
+        if !conditions.is_empty() {
+            query.push_str(" WHERE ");
+            query.push_str(&conditions.join(" AND "));
+        }
+
+        log::debug!("Executing filtered count query: {}", query);
+        
+        match self.client.query(&query).fetch_one().await {
+            Ok(count) => Ok(count),
+            Err(e) => {
+                log::error!("Failed to get filtered count from ClickHouse: {}", e);
+                // Fall back to total count if filtering fails
+                self.get_alerts_count().await
+            }
+        }
     }
 
     // Debug function to check what's in the database
@@ -825,6 +1031,148 @@ impl ClickHouseConnection {
         log::debug!("Severity breakdown: {:?}", severity_breakdown);
         
         Ok((message_rate, total, type_breakdown, severity_breakdown))
+    }
+
+    // Analysis methods for the Alert Analysis dashboard
+    pub async fn get_severity_distribution(&self, time_range: &str) -> Result<Vec<serde_json::Value>> {
+        let minutes = parse_time_range_to_minutes(time_range);
+        let query = format!(r#"
+            SELECT 
+                CASE 
+                    WHEN severity >= 9 THEN '严重'
+                    WHEN severity >= 7 THEN '高危'
+                    WHEN severity >= 5 THEN '中危'
+                    WHEN severity >= 3 THEN '低危'
+                    ELSE '信息'
+                END as name,
+                count(*) as value,
+                CASE 
+                    WHEN severity >= 9 THEN '#ff4444'
+                    WHEN severity >= 7 THEN '#ff8800'
+                    WHEN severity >= 5 THEN '#ffcc00'
+                    WHEN severity >= 3 THEN '#00aa00'
+                    ELSE '#0088cc'
+                END as color
+            FROM alerts.common_alerts
+            WHERE processed_time >= now() - INTERVAL {} MINUTE
+            GROUP BY name, color
+            ORDER BY 
+                CASE name
+                    WHEN '严重' THEN 1
+                    WHEN '高危' THEN 2
+                    WHEN '中危' THEN 3
+                    WHEN '低危' THEN 4
+                    ELSE 5
+                END
+        "#, minutes);
+
+        #[derive(Debug, Row, Deserialize)]
+        struct SeverityRow {
+            name: String,
+            value: u64,
+            color: String,
+        }
+
+        let rows: Vec<SeverityRow> = self.client.query(&query).fetch_all().await?;
+        let result: Vec<serde_json::Value> = rows.into_iter().map(|row| {
+            serde_json::json!({
+                "name": row.name,
+                "value": row.value,
+                "color": row.color
+            })
+        }).collect();
+
+        Ok(result)
+    }
+
+    pub async fn get_time_series_trend(&self, time_range: &str) -> Result<Vec<serde_json::Value>> {
+        let minutes = parse_time_range_to_minutes(time_range);
+        let interval = if minutes <= 60 { 15 } else if minutes <= 360 { 30 } else { 60 };
+        
+        let query = format!(r#"
+            SELECT 
+                formatDateTime(toStartOfInterval(processed_time, INTERVAL {} MINUTE), '%H:%M') as time,
+                count(*) as alerts
+            FROM alerts.common_alerts
+            WHERE processed_time >= now() - INTERVAL {} MINUTE
+            GROUP BY toStartOfInterval(processed_time, INTERVAL {} MINUTE)
+            ORDER BY time
+        "#, interval, minutes, interval);
+
+        #[derive(Debug, Row, Deserialize)]
+        struct TrendRow {
+            time: String,
+            alerts: u64,
+        }
+
+        let rows: Vec<TrendRow> = self.client.query(&query).fetch_all().await?;
+        let result: Vec<serde_json::Value> = rows.into_iter().map(|row| {
+            serde_json::json!({
+                "time": row.time,
+                "alerts": row.alerts
+            })
+        }).collect();
+
+        Ok(result)
+    }
+
+    pub async fn get_type_clustering(&self, time_range: &str) -> Result<Vec<serde_json::Value>> {
+        let minutes = parse_time_range_to_minutes(time_range);
+        let query = format!(r#"
+            WITH total_count AS (
+                SELECT count(*) as total 
+                FROM alerts.common_alerts 
+                WHERE processed_time >= now() - INTERVAL {} MINUTE
+            )
+            SELECT 
+                CASE 
+                    WHEN data_type = 'edr' THEN 'EDR告警'
+                    WHEN data_type = 'ngav' THEN 'NGAV告警'
+                    WHEN data_type = 'dns' THEN 'DNS异常'
+                    WHEN data_type = 'sysmon' THEN 'Sysmon事件'
+                    ELSE '其他'
+                END as type,
+                count(*) as count,
+                round(count(*) * 100.0 / total_count.total, 1) as percentage
+            FROM alerts.common_alerts, total_count
+            WHERE processed_time >= now() - INTERVAL {} MINUTE
+            GROUP BY type, total_count.total
+            ORDER BY count DESC
+        "#, minutes, minutes);
+
+        #[derive(Debug, Row, Deserialize)]
+        struct TypeRow {
+            r#type: String,
+            count: u64,
+            percentage: f64,
+        }
+
+        let rows: Vec<TypeRow> = self.client.query(&query).fetch_all().await?;
+        let result: Vec<serde_json::Value> = rows.into_iter().map(|row| {
+            serde_json::json!({
+                "type": row.r#type,
+                "count": row.count,
+                "percentage": row.percentage
+            })
+        }).collect();
+
+        Ok(result)
+    }
+}
+
+// Helper function to parse time range strings to minutes
+fn parse_time_range_to_minutes(time_range: &str) -> u32 {
+    match time_range {
+        "15m" => 15,
+        "30m" => 30,
+        "1h" => 60,
+        "3h" => 180,
+        "6h" => 360,
+        "12h" => 720,
+        "24h" => 1440,
+        "3d" => 4320,
+        "7d" => 10080,
+        _ => 60, // default to 1 hour
     }
 }
 

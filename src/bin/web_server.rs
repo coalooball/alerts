@@ -15,6 +15,7 @@ use tower_http::{cors::CorsLayer, services::ServeDir};
 
 use alerts::{AlertMessage, KafkaConfig, KafkaProducer, Database, DatabaseConfig, ClickHouseConnection, ConsumerService};
 use alerts::kafka::config::{KafkaProducerConfig, KafkaConsumerConfig};
+use alerts::clickhouse::AlertFilters;
 
 #[derive(Clone)]
 struct AppState {
@@ -28,6 +29,12 @@ struct AppState {
 struct TestConnectivityQuery {
     bootstrap_servers: Option<String>,
     topic: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct AnalysisQuery {
+    #[serde(rename = "timeRange")]
+    time_range: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -163,6 +170,15 @@ struct AlertsResponse {
 struct AlertsQuery {
     limit: Option<u32>,
     offset: Option<u32>,
+    device_name: Option<String>,
+    device_ip: Option<String>,
+    alert_type: Option<String>,
+    threat_category: Option<String>,
+    severity: Option<u32>,
+    data_type: Option<String>,
+    kafka_source: Option<String>,
+    date_from: Option<String>,
+    date_to: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -379,6 +395,9 @@ async fn main() -> Result<()> {
         .route("/api/consumer-status", get(get_consumer_status))
         .route("/api/live-messages", get(get_live_messages))
         .route("/api/kafka-stats", get(get_kafka_stats))
+        .route("/api/analysis/severity-distribution", get(get_severity_distribution))
+        .route("/api/analysis/time-series", get(get_time_series_trend))
+        .route("/api/analysis/type-clustering", get(get_type_clustering))
         .nest_service("/", ServeDir::new("./frontend/dist"))
         .layer(
             ServiceBuilder::new()
@@ -1122,7 +1141,20 @@ async fn get_alerts(
                 error!("Failed to debug table contents: {}", e);
             }
             
-            match ch.get_common_alerts(limit, offset).await {
+            // Convert AlertsQuery to AlertFilters
+            let filters = AlertFilters {
+                device_name: params.device_name.clone(),
+                device_ip: params.device_ip.clone(),
+                alert_type: params.alert_type.clone(),
+                threat_category: params.threat_category.clone(),
+                severity: params.severity,
+                data_type: params.data_type.clone(),
+                kafka_source: params.kafka_source.clone(),
+                date_from: params.date_from.clone(),
+                date_to: params.date_to.clone(),
+            };
+            
+            match ch.get_common_alerts_with_filters(limit, offset, &filters).await {
                 Ok(alerts) => {
                     info!("Successfully retrieved {} alerts from ClickHouse", alerts.len());
                     let alerts_json: Vec<serde_json::Value> = alerts
@@ -1139,11 +1171,11 @@ async fn get_alerts(
                         })
                         .collect();
                     
-                    // Get total count from database
-                    let total = match ch.get_alerts_count().await {
+                    // Get filtered total count from database
+                    let total = match ch.get_filtered_alerts_count(&filters).await {
                         Ok(count) => count,
                         Err(e) => {
-                            error!("Failed to get alerts count: {}", e);
+                            error!("Failed to get filtered alerts count: {}", e);
                             alerts_json.len() as u64
                         }
                     };
@@ -1382,4 +1414,74 @@ async fn get_kafka_stats(
         type_breakdown,
         severity_breakdown,
     }))
+}
+
+// Analysis API handlers
+async fn get_severity_distribution(
+    Query(params): Query<AnalysisQuery>,
+    State(state): State<Arc<AppState>>,
+) -> Result<ResponseJson<serde_json::Value>, StatusCode> {
+    let time_range = params.time_range.unwrap_or_else(|| "1h".to_string());
+    
+    match &state.clickhouse {
+        Some(ch) => {
+            match ch.get_severity_distribution(&time_range).await {
+                Ok(data) => Ok(ResponseJson(serde_json::Value::Array(data))),
+                Err(e) => {
+                    error!("Failed to get severity distribution: {}", e);
+                    Err(StatusCode::INTERNAL_SERVER_ERROR)
+                }
+            }
+        }
+        None => {
+            error!("ClickHouse connection not available");
+            Err(StatusCode::SERVICE_UNAVAILABLE)
+        }
+    }
+}
+
+async fn get_time_series_trend(
+    Query(params): Query<AnalysisQuery>,
+    State(state): State<Arc<AppState>>,
+) -> Result<ResponseJson<serde_json::Value>, StatusCode> {
+    let time_range = params.time_range.unwrap_or_else(|| "1h".to_string());
+    
+    match &state.clickhouse {
+        Some(ch) => {
+            match ch.get_time_series_trend(&time_range).await {
+                Ok(data) => Ok(ResponseJson(serde_json::Value::Array(data))),
+                Err(e) => {
+                    error!("Failed to get time series trend: {}", e);
+                    Err(StatusCode::INTERNAL_SERVER_ERROR)
+                }
+            }
+        }
+        None => {
+            error!("ClickHouse connection not available");
+            Err(StatusCode::SERVICE_UNAVAILABLE)
+        }
+    }
+}
+
+async fn get_type_clustering(
+    Query(params): Query<AnalysisQuery>,
+    State(state): State<Arc<AppState>>,
+) -> Result<ResponseJson<serde_json::Value>, StatusCode> {
+    let time_range = params.time_range.unwrap_or_else(|| "1h".to_string());
+    
+    match &state.clickhouse {
+        Some(ch) => {
+            match ch.get_type_clustering(&time_range).await {
+                Ok(data) => Ok(ResponseJson(serde_json::Value::Array(data))),
+                Err(e) => {
+                    error!("Failed to get type clustering: {}", e);
+                    Err(StatusCode::INTERNAL_SERVER_ERROR)
+                }
+            }
+        }
+        None => {
+            error!("ClickHouse connection not available");
+            Err(StatusCode::SERVICE_UNAVAILABLE)
+        }
+    }
 }
