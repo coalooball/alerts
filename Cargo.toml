@@ -16,6 +16,10 @@ path = "src/bin/kafka_consumer.rs"
 name = "web-server"
 path = "src/bin/web_server.rs"
 
+[[bin]]
+name = "hash-password"
+path = "src/bin/hash_password.rs"
+
 [dependencies]
 rdkafka = { version = "0.35", features = ["cmake-build"] }
 tokio = { version = "1.0", features = ["full"] }
@@ -34,3 +38,4 @@ tower-http = { version = "0.5", features = ["fs", "cors"] }
 sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "chrono", "uuid"] }
 uuid = { version = "1.0", features = ["v4", "serde"] }
 clickhouse = { version = "0.13", features = ["rustls-tls", "uuid", "chrono"] }
+bcrypt = "0.15"

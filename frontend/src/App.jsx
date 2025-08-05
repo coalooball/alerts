@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import './App.css';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
 
 // 导入自定义hooks
 import { useConfigs } from './hooks/useConfigs';
@@ -19,11 +20,14 @@ import ThreatEventAnalysis from './components/ThreatEventAnalysis';
 import Logs from './components/Logs';
 import TestModal from './components/TestModal';
 import Tooltip from './components/Tooltip';
+import UserManagement from './components/UserManagement';
+import UserInfo from './components/UserInfo';
 
-function App() {
+const AppContent = () => {
   const [activeView, setActiveView] = useState('home');
   const [configTab, setConfigTab] = useState('kafka');
   const [threatEventTab, setThreatEventTab] = useState('list');
+  const { user, isLoading } = useAuth();
 
   // 使用自定义hooks
   const {
@@ -160,10 +164,26 @@ function App() {
     </div>
   );
 
+  // Show login form if user is not authenticated
+  if (!user && !isLoading) {
+    return <UserManagement />;
+  }
+
+  // Show loading screen while checking authentication
+  if (isLoading) {
+    return (
+      <div className="app-loading">
+        <div className="loading-spinner"></div>
+        <p>Loading...</p>
+      </div>
+    );
+  }
+
   return (
     <div className="app">
       <header className="app-header">
         <h1>挖掘告警系统</h1>
+        <UserInfo />
       </header>
 
       <div className="app-container">
@@ -222,6 +242,14 @@ function App() {
       <Tooltip tooltip={tooltip} />
       <TestModal testModal={testModal} closeTestModal={closeTestModal} />
     </div>
+  );
+};
+
+function App() {
+  return (
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
   );
 }
 

@@ -180,6 +180,10 @@ impl Database {
         Ok(Self { pool })
     }
 
+    pub fn get_pool(&self) -> &PgPool {
+        &self.pool
+    }
+
     pub async fn initialize_schema(&self) -> Result<()> {
         log::info!("🔧 Initializing database schema...");
 

@@ -13,7 +13,7 @@ use std::sync::Arc;
 use tower::ServiceBuilder;
 use tower_http::{cors::CorsLayer, services::ServeDir};
 
-use alerts::{AlertMessage, KafkaConfig, KafkaProducer, Database, DatabaseConfig, ClickHouseConnection, ConsumerService};
+use alerts::{AlertMessage, KafkaConfig, KafkaProducer, Database, DatabaseConfig, ClickHouseConnection, ConsumerService, AuthService, LoginRequest, LoginResponse};
 use alerts::kafka::config::{KafkaProducerConfig, KafkaConsumerConfig};
 use alerts::clickhouse::AlertFilters;
 
@@ -23,6 +23,7 @@ struct AppState {
     database: Arc<Database>,
     clickhouse: Option<Arc<ClickHouseConnection>>,
     consumer_service: Option<Arc<ConsumerService>>,
+    auth_service: Arc<AuthService>,
 }
 
 #[derive(Deserialize)]
@@ -366,14 +367,23 @@ async fn main() -> Result<()> {
         None
     };
 
+    // Initialize authentication service
+    let auth_service = Arc::new(AuthService::new(database.get_pool().clone()));
+
     let state = AppState { 
         config, 
-        database, 
+        database: Arc::clone(&database), 
         clickhouse,
         consumer_service,
+        auth_service,
     };
 
     let app = Router::new()
+        // Authentication routes
+        .route("/api/login", post(login))
+        .route("/api/logout", post(logout))
+        .route("/api/me", get(get_current_user))
+        // Other API routes
         .route("/api/test-connectivity", get(test_connectivity))
         .route("/api/config", get(get_config))
         .route("/api/configs", get(list_configs))
@@ -1482,6 +1492,132 @@ async fn get_type_clustering(
         None => {
             error!("ClickHouse connection not available");
             Err(StatusCode::SERVICE_UNAVAILABLE)
+        }
+    }
+}
+
+// Authentication handlers
+async fn login(
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<LoginRequest>,
+) -> Result<ResponseJson<LoginResponse>, StatusCode> {
+    info!("Login attempt for user: {}", request.username);
+
+    match state.auth_service.authenticate_user(&request.username, &request.password).await {
+        Ok(Some(user)) => {
+            match state.auth_service.create_session(user.id).await {
+                Ok(session) => {
+                    info!("✅ User {} logged in successfully", user.username);
+                    Ok(ResponseJson(LoginResponse {
+                        success: true,
+                        message: "Login successful".to_string(),
+                        user: Some(user),
+                        session_token: Some(session.session_token),
+                    }))
+                }
+                Err(e) => {
+                    error!("❌ Failed to create session: {}", e);
+                    Ok(ResponseJson(LoginResponse {
+                        success: false,
+                        message: "Failed to create session".to_string(),
+                        user: None,
+                        session_token: None,
+                    }))
+                }
+            }
+        }
+        Ok(None) => {
+            info!("❌ Invalid credentials for user: {}", request.username);
+            Ok(ResponseJson(LoginResponse {
+                success: false,
+                message: "Invalid username or password".to_string(),
+                user: None,
+                session_token: None,
+            }))
+        }
+        Err(e) => {
+            error!("❌ Login error: {}", e);
+            Ok(ResponseJson(LoginResponse {
+                success: false,
+                message: "Authentication error".to_string(),
+                user: None,
+                session_token: None,
+            }))
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct LogoutRequest {
+    session_token: String,
+}
+
+async fn logout(
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<LogoutRequest>,
+) -> Result<ResponseJson<serde_json::Value>, StatusCode> {
+    info!("Logout request");
+
+    match state.auth_service.invalidate_session(&request.session_token).await {
+        Ok(_) => {
+            info!("✅ User logged out successfully");
+            Ok(ResponseJson(serde_json::json!({
+                "success": true,
+                "message": "Logged out successfully"
+            })))
+        }
+        Err(e) => {
+            error!("❌ Logout error: {}", e);
+            Ok(ResponseJson(serde_json::json!({
+                "success": false,
+                "message": "Logout error"
+            })))
+        }
+    }
+}
+
+async fn get_current_user(
+    State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
+) -> Result<ResponseJson<serde_json::Value>, StatusCode> {
+    let session_token = match headers.get("authorization") {
+        Some(value) => {
+            let auth_header = value.to_str().unwrap_or("");
+            if auth_header.starts_with("Bearer ") {
+                &auth_header[7..]
+            } else {
+                ""
+            }
+        }
+        None => ""
+    };
+
+    if session_token.is_empty() {
+        return Ok(ResponseJson(serde_json::json!({
+            "success": false,
+            "message": "No session token provided"
+        })));
+    }
+
+    match state.auth_service.validate_session(session_token).await {
+        Ok(Some(user)) => {
+            Ok(ResponseJson(serde_json::json!({
+                "success": true,
+                "user": user
+            })))
+        }
+        Ok(None) => {
+            Ok(ResponseJson(serde_json::json!({
+                "success": false,
+                "message": "Invalid or expired session"
+            })))
+        }
+        Err(e) => {
+            error!("❌ Session validation error: {}", e);
+            Ok(ResponseJson(serde_json::json!({
+                "success": false,
+                "message": "Session validation error"
+            })))
         }
     }
 }
