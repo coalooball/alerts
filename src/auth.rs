@@ -10,6 +10,7 @@ pub struct User {
     pub id: Uuid,
     pub username: String,
     pub email: String,
+    pub role: String,
     pub is_active: bool,
     pub created_at: chrono::DateTime<Utc>,
     pub updated_at: chrono::DateTime<Utc>,
@@ -67,13 +68,14 @@ impl AuthService {
             username: String,
             email: String,
             password_hash: String,
+            role: String,
             is_active: bool,
             created_at: chrono::DateTime<chrono::Utc>,
             updated_at: chrono::DateTime<chrono::Utc>,
         }
 
         let user = sqlx::query_as::<_, UserRow>(
-            "SELECT id, username, email, password_hash, is_active, created_at, updated_at 
+            "SELECT id, username, email, password_hash, role, is_active, created_at, updated_at 
              FROM users WHERE username = $1 AND is_active = true"
         )
         .bind(username)
@@ -88,6 +90,7 @@ impl AuthService {
                     id: user_row.id,
                     username: user_row.username,
                     email: user_row.email,
+                    role: user_row.role,
                     is_active: user_row.is_active,
                     created_at: user_row.created_at,
                     updated_at: user_row.updated_at,
@@ -143,13 +146,14 @@ impl AuthService {
             id: Uuid,
             username: String,
             email: String,
+            role: String,
             is_active: bool,
             created_at: chrono::DateTime<chrono::Utc>,
             updated_at: chrono::DateTime<chrono::Utc>,
         }
 
         let session = sqlx::query_as::<_, SessionUserRow>(
-            "SELECT us.user_id, us.expires_at, u.id, u.username, u.email, u.is_active, u.created_at, u.updated_at
+            "SELECT us.user_id, us.expires_at, u.id, u.username, u.email, u.role, u.is_active, u.created_at, u.updated_at
              FROM user_sessions us
              JOIN users u ON us.user_id = u.id
              WHERE us.session_token = $1 AND us.expires_at > NOW() AND u.is_active = true"
@@ -163,6 +167,7 @@ impl AuthService {
                 id: session.id,
                 username: session.username,
                 email: session.email,
+                role: session.role,
                 is_active: session.is_active,
                 created_at: session.created_at,
                 updated_at: session.updated_at,
@@ -187,6 +192,144 @@ impl AuthService {
             .await?;
 
         Ok(result.rows_affected())
+    }
+
+    // User management methods for admin users
+    pub async fn create_user(&self, username: &str, email: &str, password: &str, role: &str) -> Result<Uuid> {
+        let password_hash = Self::hash_password(password)?;
+        
+        #[derive(sqlx::FromRow)]
+        struct IdRow {
+            id: Uuid,
+        }
+        
+        let result = sqlx::query_as::<_, IdRow>(
+            "INSERT INTO users (username, email, password_hash, role, is_active) 
+             VALUES ($1, $2, $3, $4, true) 
+             RETURNING id"
+        )
+        .bind(username)
+        .bind(email)
+        .bind(password_hash)
+        .bind(role)
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(result.id)
+    }
+
+    pub async fn list_users(&self) -> Result<Vec<User>> {
+        #[derive(sqlx::FromRow)]
+        struct UserRow {
+            id: Uuid,
+            username: String,
+            email: String,
+            role: String,
+            is_active: bool,
+            created_at: chrono::DateTime<chrono::Utc>,
+            updated_at: chrono::DateTime<chrono::Utc>,
+        }
+
+        let users = sqlx::query_as::<_, UserRow>(
+            "SELECT id, username, email, role, is_active, created_at, updated_at 
+             FROM users ORDER BY created_at DESC"
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(users.into_iter().map(|user| User {
+            id: user.id,
+            username: user.username,
+            email: user.email,
+            role: user.role,
+            is_active: user.is_active,
+            created_at: user.created_at,
+            updated_at: user.updated_at,
+        }).collect())
+    }
+
+    pub async fn update_user(&self, user_id: Uuid, username: &str, email: &str, role: &str, is_active: bool) -> Result<()> {
+        sqlx::query(
+            "UPDATE users SET username = $1, email = $2, role = $3, is_active = $4, updated_at = NOW() 
+             WHERE id = $5"
+        )
+        .bind(username)
+        .bind(email)
+        .bind(role)
+        .bind(is_active)
+        .bind(user_id)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    pub async fn update_user_password(&self, user_id: Uuid, new_password: &str) -> Result<()> {
+        let password_hash = Self::hash_password(new_password)?;
+        
+        sqlx::query("UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2")
+            .bind(password_hash)
+            .bind(user_id)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(())
+    }
+
+    pub async fn delete_user(&self, user_id: Uuid) -> Result<()> {
+        // First invalidate all sessions for this user
+        sqlx::query("DELETE FROM user_sessions WHERE user_id = $1")
+            .bind(user_id)
+            .execute(&self.pool)
+            .await?;
+
+        // Then delete the user
+        sqlx::query("DELETE FROM users WHERE id = $1")
+            .bind(user_id)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(())
+    }
+
+    pub async fn get_user_by_id(&self, user_id: Uuid) -> Result<Option<User>> {
+        #[derive(sqlx::FromRow)]
+        struct UserRow {
+            id: Uuid,
+            username: String,
+            email: String,
+            role: String,
+            is_active: bool,
+            created_at: chrono::DateTime<chrono::Utc>,
+            updated_at: chrono::DateTime<chrono::Utc>,
+        }
+
+        let user = sqlx::query_as::<_, UserRow>(
+            "SELECT id, username, email, role, is_active, created_at, updated_at 
+             FROM users WHERE id = $1"
+        )
+        .bind(user_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(user.map(|u| User {
+            id: u.id,
+            username: u.username,
+            email: u.email,
+            role: u.role,
+            is_active: u.is_active,
+            created_at: u.created_at,
+            updated_at: u.updated_at,
+        }))
+    }
+
+    // Role checking methods
+    pub fn is_admin(user: &User) -> bool {
+        user.role == "admin"
+    }
+
+    pub fn has_role(user: &User, role: &str) -> bool {
+        user.role == role
     }
 }
 

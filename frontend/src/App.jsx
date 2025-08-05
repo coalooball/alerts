@@ -20,8 +20,9 @@ import ThreatEventAnalysis from './components/ThreatEventAnalysis';
 import Logs from './components/Logs';
 import TestModal from './components/TestModal';
 import Tooltip from './components/Tooltip';
-import UserManagement from './components/UserManagement';
+import LoginForm from './components/LoginForm';
 import UserInfo from './components/UserInfo';
+import UserManagementPage from './components/UserManagementPage';
 
 const AppContent = () => {
   const [activeView, setActiveView] = useState('home');
@@ -166,7 +167,14 @@ const AppContent = () => {
 
   // Show login form if user is not authenticated
   if (!user && !isLoading) {
-    return <UserManagement />;
+    return (
+      <div className="app">
+        <header className="app-header">
+          <h1>挖掘告警系统</h1>
+        </header>
+        <LoginForm />
+      </div>
+    );
   }
 
   // Show loading screen while checking authentication
@@ -219,6 +227,13 @@ const AppContent = () => {
                 ⚙️ 配置
               </button>
             </li>
+            {user && user.role === 'admin' && (
+              <li className={activeView === 'users' ? 'active' : ''}>
+                <button onClick={() => setActiveView('users')}>
+                  👥 用户管理
+                </button>
+              </li>
+            )}
           </ul>
         </nav>
 
@@ -236,6 +251,7 @@ const AppContent = () => {
           {activeView === 'threats' && renderThreatEventPage()}
           {activeView === 'logs' && <Logs />}
           {activeView === 'config' && renderConfigPage()}
+          {activeView === 'users' && user && user.role === 'admin' && <UserManagementPage />}
         </main>
       </div>
 

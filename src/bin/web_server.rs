@@ -383,6 +383,13 @@ async fn main() -> Result<()> {
         .route("/api/login", post(login))
         .route("/api/logout", post(logout))
         .route("/api/me", get(get_current_user))
+        // User management routes (admin only)
+        .route("/api/users", get(list_users))
+        .route("/api/users", post(create_user))
+        .route("/api/users/:id", get(get_user))
+        .route("/api/users/:id", put(update_user))
+        .route("/api/users/:id", delete(delete_user))
+        .route("/api/users/:id/password", put(update_user_password))
         // Other API routes
         .route("/api/test-connectivity", get(test_connectivity))
         .route("/api/config", get(get_config))
@@ -1617,6 +1624,267 @@ async fn get_current_user(
             Ok(ResponseJson(serde_json::json!({
                 "success": false,
                 "message": "Session validation error"
+            })))
+        }
+    }
+}
+
+// Helper function to check if user is admin
+async fn check_admin_permission(
+    State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
+) -> Result<alerts::User, axum::http::StatusCode> {
+    let session_token = match headers.get("authorization") {
+        Some(value) => {
+            let auth_header = value.to_str().unwrap_or("");
+            if auth_header.starts_with("Bearer ") {
+                &auth_header[7..]
+            } else {
+                return Err(StatusCode::UNAUTHORIZED);
+            }
+        }
+        None => return Err(StatusCode::UNAUTHORIZED),
+    };
+
+    match state.auth_service.validate_session(session_token).await {
+        Ok(Some(user)) => {
+            if alerts::AuthService::is_admin(&user) {
+                Ok(user)
+            } else {
+                Err(StatusCode::FORBIDDEN)
+            }
+        }
+        Ok(None) => Err(StatusCode::UNAUTHORIZED),
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
+}
+
+// User management API handlers
+#[derive(Deserialize)]
+struct CreateUserRequest {
+    username: String,
+    email: String,
+    password: String,
+    role: String,
+}
+
+#[derive(Deserialize)]
+struct UpdateUserRequest {
+    username: String,
+    email: String,
+    role: String,
+    is_active: bool,
+}
+
+#[derive(Deserialize)]
+struct UpdatePasswordRequest {
+    password: String,
+}
+
+async fn list_users(
+    State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
+) -> Result<ResponseJson<serde_json::Value>, StatusCode> {
+    let _admin_user = check_admin_permission(State(state.clone()), headers).await?;
+
+    match state.auth_service.list_users().await {
+        Ok(users) => {
+            let users_json: Vec<serde_json::Value> = users
+                .into_iter()
+                .map(|user| serde_json::to_value(user).unwrap_or_default())
+                .collect();
+
+            Ok(ResponseJson(serde_json::json!({
+                "success": true,
+                "users": users_json
+            })))
+        }
+        Err(e) => {
+            error!("❌ Failed to list users: {}", e);
+            Ok(ResponseJson(serde_json::json!({
+                "success": false,
+                "message": "Failed to list users"
+            })))
+        }
+    }
+}
+
+async fn create_user(
+    State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
+    Json(request): Json<CreateUserRequest>,
+) -> Result<ResponseJson<serde_json::Value>, StatusCode> {
+    let _admin_user = check_admin_permission(State(state.clone()), headers).await?;
+
+    info!("Creating new user: {}", request.username);
+
+    match state.auth_service.create_user(&request.username, &request.email, &request.password, &request.role).await {
+        Ok(user_id) => {
+            info!("✅ User created successfully: {}", user_id);
+            Ok(ResponseJson(serde_json::json!({
+                "success": true,
+                "message": "User created successfully",
+                "user_id": user_id
+            })))
+        }
+        Err(e) => {
+            error!("❌ Failed to create user: {}", e);
+            Ok(ResponseJson(serde_json::json!({
+                "success": false,
+                "message": format!("Failed to create user: {}", e)
+            })))
+        }
+    }
+}
+
+async fn get_user(
+    State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> Result<ResponseJson<serde_json::Value>, StatusCode> {
+    let _admin_user = check_admin_permission(State(state.clone()), headers).await?;
+
+    let user_id = match uuid::Uuid::parse_str(&id) {
+        Ok(uuid) => uuid,
+        Err(_) => {
+            return Ok(ResponseJson(serde_json::json!({
+                "success": false,
+                "message": "Invalid user ID format"
+            })));
+        }
+    };
+
+    match state.auth_service.get_user_by_id(user_id).await {
+        Ok(Some(user)) => {
+            Ok(ResponseJson(serde_json::json!({
+                "success": true,
+                "user": user
+            })))
+        }
+        Ok(None) => {
+            Ok(ResponseJson(serde_json::json!({
+                "success": false,
+                "message": "User not found"
+            })))
+        }
+        Err(e) => {
+            error!("❌ Failed to get user: {}", e);
+            Ok(ResponseJson(serde_json::json!({
+                "success": false,
+                "message": "Failed to get user"
+            })))
+        }
+    }
+}
+
+async fn update_user(
+    State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
+    axum::extract::Path(id): axum::extract::Path<String>,
+    Json(request): Json<UpdateUserRequest>,
+) -> Result<ResponseJson<serde_json::Value>, StatusCode> {
+    let _admin_user = check_admin_permission(State(state.clone()), headers).await?;
+
+    let user_id = match uuid::Uuid::parse_str(&id) {
+        Ok(uuid) => uuid,
+        Err(_) => {
+            return Ok(ResponseJson(serde_json::json!({
+                "success": false,
+                "message": "Invalid user ID format"
+            })));
+        }
+    };
+
+    info!("Updating user: {}", user_id);
+
+    match state.auth_service.update_user(user_id, &request.username, &request.email, &request.role, request.is_active).await {
+        Ok(_) => {
+            info!("✅ User updated successfully: {}", user_id);
+            Ok(ResponseJson(serde_json::json!({
+                "success": true,
+                "message": "User updated successfully"
+            })))
+        }
+        Err(e) => {
+            error!("❌ Failed to update user: {}", e);
+            Ok(ResponseJson(serde_json::json!({
+                "success": false,
+                "message": format!("Failed to update user: {}", e)
+            })))
+        }
+    }
+}
+
+async fn delete_user(
+    State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> Result<ResponseJson<serde_json::Value>, StatusCode> {
+    let _admin_user = check_admin_permission(State(state.clone()), headers).await?;
+
+    let user_id = match uuid::Uuid::parse_str(&id) {
+        Ok(uuid) => uuid,
+        Err(_) => {
+            return Ok(ResponseJson(serde_json::json!({
+                "success": false,
+                "message": "Invalid user ID format"
+            })));
+        }
+    };
+
+    info!("Deleting user: {}", user_id);
+
+    match state.auth_service.delete_user(user_id).await {
+        Ok(_) => {
+            info!("✅ User deleted successfully: {}", user_id);
+            Ok(ResponseJson(serde_json::json!({
+                "success": true,
+                "message": "User deleted successfully"
+            })))
+        }
+        Err(e) => {
+            error!("❌ Failed to delete user: {}", e);
+            Ok(ResponseJson(serde_json::json!({
+                "success": false,
+                "message": format!("Failed to delete user: {}", e)
+            })))
+        }
+    }
+}
+
+async fn update_user_password(
+    State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
+    axum::extract::Path(id): axum::extract::Path<String>,
+    Json(request): Json<UpdatePasswordRequest>,
+) -> Result<ResponseJson<serde_json::Value>, StatusCode> {
+    let _admin_user = check_admin_permission(State(state.clone()), headers).await?;
+
+    let user_id = match uuid::Uuid::parse_str(&id) {
+        Ok(uuid) => uuid,
+        Err(_) => {
+            return Ok(ResponseJson(serde_json::json!({
+                "success": false,
+                "message": "Invalid user ID format"
+            })));
+        }
+    };
+
+    info!("Updating password for user: {}", user_id);
+
+    match state.auth_service.update_user_password(user_id, &request.password).await {
+        Ok(_) => {
+            info!("✅ Password updated successfully for user: {}", user_id);
+            Ok(ResponseJson(serde_json::json!({
+                "success": true,
+                "message": "Password updated successfully"
+            })))
+        }
+        Err(e) => {
+            error!("❌ Failed to update password: {}", e);
+            Ok(ResponseJson(serde_json::json!({
+                "success": false,
+                "message": format!("Failed to update password: {}", e)
             })))
         }
     }

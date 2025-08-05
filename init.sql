@@ -217,6 +217,7 @@ CREATE TABLE IF NOT EXISTS users (
     username VARCHAR(255) NOT NULL UNIQUE,
     email VARCHAR(255) NOT NULL UNIQUE,
     password_hash VARCHAR(255) NOT NULL,
+    role VARCHAR(50) NOT NULL DEFAULT 'user',
     is_active BOOLEAN NOT NULL DEFAULT true,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
@@ -226,6 +227,7 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE INDEX IF NOT EXISTS idx_users_username ON users (username);
 CREATE INDEX IF NOT EXISTS idx_users_email ON users (email);
 CREATE INDEX IF NOT EXISTS idx_users_active ON users (is_active);
+CREATE INDEX IF NOT EXISTS idx_users_role ON users (role);
 
 -- Create trigger to automatically update updated_at for users
 DROP TRIGGER IF EXISTS update_users_updated_at ON users;
@@ -254,10 +256,12 @@ INSERT INTO users (
     username,
     email,
     password_hash,
+    role,
     is_active
 ) VALUES (
     'admin',
     'admin@localhost',
     '$2b$12$H4FMivSts0pj2E/lxoEbweHT1Mdy1Y0lMqCQ7gqNsEz967wkwqRp2',
+    'admin',
     true
 ) ON CONFLICT (username) DO NOTHING;
