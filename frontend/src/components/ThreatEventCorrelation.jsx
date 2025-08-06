@@ -9,6 +9,20 @@ const ThreatEventCorrelation = () => {
   const [selectedThreatEvent, setSelectedThreatEvent] = useState('');
   const [correlationType, setCorrelationType] = useState('');
   const [correlationReason, setCorrelationReason] = useState('');
+  const [correlationMode, setCorrelationMode] = useState('existing'); // 'existing' or 'new'
+  const [threatEventSearch, setThreatEventSearch] = useState('');
+  const [filteredThreatEvents, setFilteredThreatEvents] = useState([]);
+  const [showThreatEventDropdown, setShowThreatEventDropdown] = useState(false);
+  
+  // 新威胁事件表单数据
+  const [newThreatEvent, setNewThreatEvent] = useState({
+    title: '',
+    description: '',
+    event_type: '',
+    severity: 3,
+    threat_category: '',
+    priority: 'medium'
+  });
   const [showCorrelationModal, setShowCorrelationModal] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage] = useState(20);
@@ -71,6 +85,36 @@ const ThreatEventCorrelation = () => {
     fetchThreatEvents();
   }, [currentPage]);
 
+  // 威胁事件搜索过滤
+  useEffect(() => {
+    if (threatEventSearch.trim() === '') {
+      setFilteredThreatEvents([]);
+      setShowThreatEventDropdown(false);
+    } else {
+      const filtered = threatEvents.filter(event => 
+        event.title.toLowerCase().includes(threatEventSearch.toLowerCase()) ||
+        event.id.toLowerCase().includes(threatEventSearch.toLowerCase()) ||
+        event.event_type.toLowerCase().includes(threatEventSearch.toLowerCase())
+      );
+      setFilteredThreatEvents(filtered.slice(0, 10)); // 限制显示10个结果
+      setShowThreatEventDropdown(filtered.length > 0);
+    }
+  }, [threatEventSearch, threatEvents]);
+
+  // 点击外部关闭下拉框
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (!event.target.closest('.search-dropdown-container')) {
+        setShowThreatEventDropdown(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
+
   const formatTimestamp = (timestamp) => {
     return new Date(timestamp).toLocaleString('zh-CN', {
       year: 'numeric',
@@ -125,15 +169,50 @@ const ThreatEventCorrelation = () => {
   };
 
   const handleSaveCorrelation = async () => {
-    if (!selectedThreatEvent || !correlationType) {
-      if (window.showToast) {
-        window.showToast('请输入威胁事件和关联类型', 'warning');
+    if (correlationMode === 'existing') {
+      if (!selectedThreatEvent || !correlationType) {
+        if (window.showToast) {
+          window.showToast('请选择威胁事件并输入关联类型', 'warning');
+        }
+        return;
       }
-      return;
+    } else {
+      if (!newThreatEvent.title || !newThreatEvent.event_type || !correlationType) {
+        if (window.showToast) {
+          window.showToast('请填写威胁事件标题、类型和关联类型', 'warning');
+        }
+        return;
+      }
     }
 
     try {
       const sessionToken = localStorage.getItem('sessionToken');
+      let threatEventId = selectedThreatEvent;
+
+      // 如果是新建威胁事件模式，先创建威胁事件
+      if (correlationMode === 'new') {
+        const createResponse = await fetch('/api/threat-events', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${sessionToken}`
+          },
+          body: JSON.stringify(newThreatEvent),
+        });
+
+        const createData = await createResponse.json();
+        
+        if (!createData.success) {
+          if (window.showToast) {
+            window.showToast('创建威胁事件失败: ' + createData.message, 'error');
+          }
+          return;
+        }
+
+        threatEventId = createData.threat_event_id;
+      }
+
+      // 关联告警到威胁事件
       const response = await fetch('/api/correlate-alerts', {
         method: 'POST',
         headers: {
@@ -141,7 +220,7 @@ const ThreatEventCorrelation = () => {
           'Authorization': `Bearer ${sessionToken}`
         },
         body: JSON.stringify({
-          threat_event_id: selectedThreatEvent,
+          threat_event_id: threatEventId,
           alert_data_ids: selectedAlerts,
           correlation_type: correlationType,
           correlation_reason: correlationReason,
@@ -152,14 +231,12 @@ const ThreatEventCorrelation = () => {
       
       if (data.success) {
         if (window.showToast) {
-          window.showToast(`成功关联 ${data.correlations_created} 个告警到威胁事件`, 'success');
+          const mode = correlationMode === 'new' ? '创建新威胁事件并' : '';
+          window.showToast(`成功${mode}关联 ${data.correlations_created} 个告警到威胁事件`, 'success');
         }
-        setShowCorrelationModal(false);
-        setSelectedAlerts([]);
-        setSelectedThreatEvent('');
-        setCorrelationType('');
-        setCorrelationReason('');
+        handleResetForm();
         fetchAnnotatedAlerts();
+        fetchThreatEvents(); // 刷新威胁事件列表
       } else {
         if (window.showToast) {
           window.showToast('关联失败: ' + data.message, 'error');
@@ -173,15 +250,34 @@ const ThreatEventCorrelation = () => {
     }
   };
 
+  const handleResetForm = () => {
+    setShowCorrelationModal(false);
+    setSelectedAlerts([]);
+    setSelectedThreatEvent('');
+    setCorrelationType('');
+    setCorrelationReason('');
+    setCorrelationMode('existing');
+    setThreatEventSearch('');
+    setShowThreatEventDropdown(false);
+    setNewThreatEvent({
+      title: '',
+      description: '',
+      event_type: '',
+      severity: 3,
+      threat_category: '',
+      priority: 'medium'
+    });
+  };
+
   const renderCorrelationModal = () => {
     if (!showCorrelationModal) return null;
 
     return (
-      <div className="modal-overlay" onClick={() => setShowCorrelationModal(false)}>
+      <div className="modal-overlay" onClick={handleResetForm}>
         <div className="modal-content correlation-modal" onClick={(e) => e.stopPropagation()}>
           <div className="modal-header">
             <h3>关联告警到威胁事件</h3>
-            <button className="close-button" onClick={() => setShowCorrelationModal(false)}>
+            <button className="close-button" onClick={handleResetForm}>
               ✕
             </button>
           </div>
@@ -192,16 +288,163 @@ const ThreatEventCorrelation = () => {
             </div>
 
             <form className="correlation-form">
+              {/* 关联模式选择 */}
               <div className="form-group">
-                <label>威胁事件 *:</label>
-                <input
-                  type="text"
-                  className="form-input"
-                  placeholder="请输入威胁事件名称或ID..."
-                  value={selectedThreatEvent}
-                  onChange={(e) => setSelectedThreatEvent(e.target.value)}
-                />
+                <label>关联方式 *:</label>
+                <div className="radio-group">
+                  <label className="radio-option">
+                    <input
+                      type="radio"
+                      value="existing"
+                      checked={correlationMode === 'existing'}
+                      onChange={(e) => setCorrelationMode(e.target.value)}
+                    />
+                    <span>关联到已有威胁事件</span>
+                  </label>
+                  <label className="radio-option">
+                    <input
+                      type="radio"
+                      value="new"
+                      checked={correlationMode === 'new'}
+                      onChange={(e) => setCorrelationMode(e.target.value)}
+                    />
+                    <span>创建新威胁事件</span>
+                  </label>
+                </div>
               </div>
+
+              {/* 已有威胁事件搜索选择 */}
+              {correlationMode === 'existing' && (
+                <div className="form-group">
+                  <label>威胁事件 *:</label>
+                  <div className="search-dropdown-container">
+                    <input
+                      type="text"
+                      className="form-input"
+                      placeholder="搜索威胁事件标题、ID或类型..."
+                      value={threatEventSearch}
+                      onChange={(e) => setThreatEventSearch(e.target.value)}
+                      onFocus={() => setShowThreatEventDropdown(filteredThreatEvents.length > 0)}
+                      autoComplete="off"
+                    />
+                    {showThreatEventDropdown && (
+                      <div className="search-dropdown">
+                        {filteredThreatEvents.map((event, index) => (
+                          <div
+                            key={event.id || index}
+                            className="dropdown-item"
+                            onClick={() => {
+                              setSelectedThreatEvent(event.id);
+                              setThreatEventSearch(`${event.title} (${event.event_type})`);
+                              setShowThreatEventDropdown(false);
+                            }}
+                          >
+                            <div className="event-title">{event.title}</div>
+                            <div className="event-details">
+                              类型: {event.event_type} | 严重程度: {
+                                event.severity === 1 ? '严重' : 
+                                event.severity === 2 ? '高' : 
+                                event.severity === 3 ? '中' : 
+                                event.severity === 4 ? '低' : '信息'
+                              }
+                            </div>
+                            <div className="event-id">ID: {event.id}</div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* 新威胁事件表单 */}
+              {correlationMode === 'new' && (
+                <>
+                  <div className="form-group">
+                    <label>事件标题 *:</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      placeholder="请输入威胁事件标题..."
+                      value={newThreatEvent.title}
+                      onChange={(e) => setNewThreatEvent({...newThreatEvent, title: e.target.value})}
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label>事件描述:</label>
+                    <textarea
+                      className="form-textarea"
+                      placeholder="详细描述威胁事件..."
+                      rows="2"
+                      value={newThreatEvent.description}
+                      onChange={(e) => setNewThreatEvent({...newThreatEvent, description: e.target.value})}
+                    />
+                  </div>
+
+                  <div className="form-row">
+                    <div className="form-group">
+                      <label>事件类型 *:</label>
+                      <select
+                        className="form-select"
+                        value={newThreatEvent.event_type}
+                        onChange={(e) => setNewThreatEvent({...newThreatEvent, event_type: e.target.value})}
+                      >
+                        <option value="">请选择事件类型</option>
+                        <option value="malware">恶意软件</option>
+                        <option value="persistence">持久化</option>
+                        <option value="lateral_movement">横向移动</option>
+                        <option value="data_exfiltration">数据泄露</option>
+                        <option value="command_and_control">命令控制</option>
+                        <option value="initial_access">初始访问</option>
+                        <option value="privilege_escalation">权限提升</option>
+                      </select>
+                    </div>
+
+                    <div className="form-group">
+                      <label>严重程度 *:</label>
+                      <select
+                        className="form-select"
+                        value={newThreatEvent.severity}
+                        onChange={(e) => setNewThreatEvent({...newThreatEvent, severity: parseInt(e.target.value)})}
+                      >
+                        <option value={1}>严重</option>
+                        <option value={2}>高</option>
+                        <option value={3}>中</option>
+                        <option value={4}>低</option>
+                        <option value={5}>信息</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="form-row">
+                    <div className="form-group">
+                      <label>威胁类别:</label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        placeholder="例: APT, ransomware, trojan..."
+                        value={newThreatEvent.threat_category}
+                        onChange={(e) => setNewThreatEvent({...newThreatEvent, threat_category: e.target.value})}
+                      />
+                    </div>
+
+                    <div className="form-group">
+                      <label>优先级:</label>
+                      <select
+                        className="form-select"
+                        value={newThreatEvent.priority}
+                        onChange={(e) => setNewThreatEvent({...newThreatEvent, priority: e.target.value})}
+                      >
+                        <option value="critical">紧急</option>
+                        <option value="high">高</option>
+                        <option value="medium">中</option>
+                        <option value="low">低</option>
+                      </select>
+                    </div>
+                  </div>
+                </>
+              )}
 
               <div className="form-group">
                 <label>关联类型 *:</label>
@@ -228,15 +471,18 @@ const ThreatEventCorrelation = () => {
           </div>
 
           <div className="modal-footer">
-            <button className="cancel-button" onClick={() => setShowCorrelationModal(false)}>
+            <button className="cancel-button" onClick={handleResetForm}>
               取消
             </button>
             <button 
               className="save-button" 
               onClick={handleSaveCorrelation}
-              disabled={!selectedThreatEvent || !correlationType}
+              disabled={
+                (correlationMode === 'existing' && (!selectedThreatEvent || !correlationType)) ||
+                (correlationMode === 'new' && (!newThreatEvent.title || !newThreatEvent.event_type || !correlationType))
+              }
             >
-              确认关联
+              {correlationMode === 'new' ? '创建事件并关联' : '确认关联'}
             </button>
           </div>
         </div>

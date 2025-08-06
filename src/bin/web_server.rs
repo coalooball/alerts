@@ -14,6 +14,7 @@ use tower::ServiceBuilder;
 use tower_http::{cors::CorsLayer, services::ServeDir};
 
 use alerts::{AlertMessage, KafkaConfig, KafkaProducer, Database, DatabaseConfig, ClickHouseConnection, ConsumerService, AuthService, LoginRequest, LoginResponse};
+use sqlx::Row;
 use alerts::kafka::config::{KafkaProducerConfig, KafkaConsumerConfig};
 use alerts::clickhouse::AlertFilters;
 use uuid::Uuid;
@@ -2487,14 +2488,52 @@ async fn get_threat_events(
 
     sql = format!("{} ORDER BY t.created_at DESC LIMIT {} OFFSET {}", sql, limit, offset);
 
-    // Temporarily return empty data until proper database implementation
-    let threat_events_json: Vec<serde_json::Value> = vec![];
-    
-    Ok(ResponseJson(ThreatEventsListResponse {
-        success: true,
-        threat_events: threat_events_json,
-        total: 0,
-    }))
+    match sqlx::query(&sql)
+        .fetch_all(state.database.get_pool())
+        .await 
+    {
+        Ok(rows) => {
+            let mut threat_events_json = Vec::new();
+            
+            for row in rows {
+                let threat_event = serde_json::json!({
+                    "id": row.get::<uuid::Uuid, _>("id").to_string(),
+                    "title": row.get::<String, _>("title"),
+                    "description": row.get::<Option<String>, _>("description"),
+                    "event_type": row.get::<String, _>("event_type"),
+                    "severity": row.get::<i32, _>("severity"),
+                    "threat_category": row.get::<Option<String>, _>("threat_category"),
+                    "status": row.get::<String, _>("status"),
+                    "priority": row.get::<String, _>("priority"),
+                    "creation_method": row.get::<String, _>("creation_method"),
+                    "created_at": row.get::<chrono::DateTime<chrono::Utc>, _>("created_at").to_rfc3339(),
+                    "updated_at": row.get::<chrono::DateTime<chrono::Utc>, _>("updated_at").to_rfc3339(),
+                    "created_by_username": row.get::<Option<String>, _>("created_by_username"),
+                    "assigned_to_username": row.get::<Option<String>, _>("assigned_to_username"),
+                    "updated_by_username": row.get::<Option<String>, _>("updated_by_username"),
+                    "mitre_techniques": row.get::<Option<serde_json::Value>, _>("mitre_techniques"),
+                    "mitre_tactics": row.get::<Option<serde_json::Value>, _>("mitre_tactics"),
+                    "tags": row.get::<Option<serde_json::Value>, _>("tags")
+                });
+                threat_events_json.push(threat_event);
+            }
+            
+            let total = threat_events_json.len() as u64;
+            Ok(ResponseJson(ThreatEventsListResponse {
+                success: true,
+                threat_events: threat_events_json,
+                total,
+            }))
+        },
+        Err(e) => {
+            error!("Failed to fetch threat events: {}", e);
+            Ok(ResponseJson(ThreatEventsListResponse {
+                success: false,
+                threat_events: vec![],
+                total: 0,
+            }))
+        }
+    }
 }
 
 async fn create_threat_event(
@@ -2518,13 +2557,45 @@ async fn create_threat_event(
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
     "#;
 
-    // Temporarily return success until proper database implementation
-    info!("✅ Threat event created successfully (placeholder): {}", threat_event_id);
-    Ok(ResponseJson(ThreatEventResponse {
-        success: true,
-        message: "Threat event created successfully".to_string(),
-        threat_event_id: Some(threat_event_id.to_string()),
-    }))
+    let event_start = request.event_start_time.and_then(|t| chrono::DateTime::parse_from_rfc3339(&t).ok());
+    let event_end = request.event_end_time.and_then(|t| chrono::DateTime::parse_from_rfc3339(&t).ok());
+
+    match sqlx::query(sql)
+        .bind(threat_event_id)
+        .bind(&request.title)
+        .bind(request.description)
+        .bind(&request.event_type)
+        .bind(request.severity)
+        .bind(request.threat_category)
+        .bind(event_start)
+        .bind(event_end)
+        .bind(tactics_json)
+        .bind(techniques_json)
+        .bind(kill_chain_json)
+        .bind(&request.priority)
+        .bind(tags_json)
+        .bind("manual")
+        .bind(user.id)
+        .execute(state.database.get_pool())
+        .await
+    {
+        Ok(_) => {
+            info!("✅ Threat event created successfully: {}", threat_event_id);
+            Ok(ResponseJson(ThreatEventResponse {
+                success: true,
+                message: "Threat event created successfully".to_string(),
+                threat_event_id: Some(threat_event_id.to_string()),
+            }))
+        },
+        Err(e) => {
+            error!("Failed to create threat event: {}", e);
+            Ok(ResponseJson(ThreatEventResponse {
+                success: false,
+                message: format!("Failed to create threat event: {}", e),
+                threat_event_id: None,
+            }))
+        }
+    }
 }
 
 async fn get_threat_event_detail(
@@ -2534,10 +2605,92 @@ async fn get_threat_event_detail(
 ) -> Result<ResponseJson<serde_json::Value>, StatusCode> {
     let _user = check_authentication(State(state.clone()), headers).await?;
 
-    // Temporarily return empty data until proper database implementation
+    // Parse the UUID
+    let threat_event_uuid = match uuid::Uuid::parse_str(&id) {
+        Ok(uuid) => uuid,
+        Err(_) => return Err(StatusCode::BAD_REQUEST)
+    };
+
+    // Get threat event details
+    let threat_event_sql = r#"
+        SELECT t.*, u1.username as created_by_username, u2.username as assigned_to_username,
+               u3.username as updated_by_username
+        FROM threat_events t 
+        LEFT JOIN users u1 ON t.created_by = u1.id
+        LEFT JOIN users u2 ON t.assigned_to = u2.id
+        LEFT JOIN users u3 ON t.updated_by = u3.id
+        WHERE t.id = $1
+    "#;
+
+    let event_row = match sqlx::query(threat_event_sql)
+        .bind(threat_event_uuid)
+        .fetch_one(state.database.get_pool())
+        .await 
+    {
+        Ok(row) => row,
+        Err(_) => return Ok(ResponseJson(serde_json::json!({
+            "success": false,
+            "message": "Threat event not found"
+        })))
+    };
+
+    // Get associated alerts
+    let correlation_sql = r#"
+        SELECT tc.alert_data_id, tc.correlation_type, tc.correlation_reason, 
+               tc.created_at as correlation_created_at,
+               ad.alert_type, ad.device_name, ad.timestamp as alert_timestamp
+        FROM threat_correlations tc
+        LEFT JOIN alert_data ad ON tc.alert_data_id = ad.id
+        WHERE tc.threat_event_id = $1
+        ORDER BY tc.created_at DESC
+    "#;
+
+    let correlation_rows = sqlx::query(correlation_sql)
+        .bind(threat_event_uuid)
+        .fetch_all(state.database.get_pool())
+        .await
+        .unwrap_or_default();
+
+    let mut associated_alerts = Vec::new();
+    for row in correlation_rows {
+        let alert = serde_json::json!({
+            "alert_id": row.get::<String, _>("alert_data_id"),
+            "alert_type": row.get::<Option<String>, _>("alert_type"),
+            "device_name": row.get::<Option<String>, _>("device_name"),
+            "correlation_type": row.get::<String, _>("correlation_type"),
+            "correlation_reason": row.get::<Option<String>, _>("correlation_reason"),
+            "correlation_created_at": row.get::<chrono::DateTime<chrono::Utc>, _>("correlation_created_at").to_rfc3339(),
+            "alert_timestamp": row.get::<Option<chrono::DateTime<chrono::Utc>>, _>("alert_timestamp")
+                .map(|dt| dt.to_rfc3339())
+        });
+        associated_alerts.push(alert);
+    }
+
+    // Build the response
+    let threat_event = serde_json::json!({
+        "id": event_row.get::<uuid::Uuid, _>("id").to_string(),
+        "title": event_row.get::<String, _>("title"),
+        "description": event_row.get::<Option<String>, _>("description"),
+        "event_type": event_row.get::<String, _>("event_type"),
+        "severity": event_row.get::<i32, _>("severity"),
+        "threat_category": event_row.get::<Option<String>, _>("threat_category"),
+        "status": event_row.get::<String, _>("status"),
+        "priority": event_row.get::<String, _>("priority"),
+        "creation_method": event_row.get::<String, _>("creation_method"),
+        "created_at": event_row.get::<chrono::DateTime<chrono::Utc>, _>("created_at").to_rfc3339(),
+        "updated_at": event_row.get::<chrono::DateTime<chrono::Utc>, _>("updated_at").to_rfc3339(),
+        "created_by_username": event_row.get::<Option<String>, _>("created_by_username"),
+        "assigned_to_username": event_row.get::<Option<String>, _>("assigned_to_username"),
+        "updated_by_username": event_row.get::<Option<String>, _>("updated_by_username"),
+        "mitre_techniques": event_row.get::<Option<serde_json::Value>, _>("mitre_techniques"),
+        "mitre_tactics": event_row.get::<Option<serde_json::Value>, _>("mitre_tactics"),
+        "tags": event_row.get::<Option<serde_json::Value>, _>("tags"),
+        "associated_alerts": associated_alerts
+    });
+
     Ok(ResponseJson(serde_json::json!({
-        "success": false,
-        "message": "Threat event detail not implemented yet"
+        "success": true,
+        "threat_event": threat_event
     })))
 }
 
@@ -2603,20 +2756,66 @@ async fn correlate_alerts_generic(
     headers: axum::http::HeaderMap,
     Json(request): Json<CorrelateAlertsRequest>,
 ) -> Result<ResponseJson<CorrelationResponse>, StatusCode> {
-    let _user = check_authentication(State(state.clone()), headers).await?;
+    let user = check_authentication(State(state.clone()), headers).await?;
     
-    let correlations_created = request.alert_data_ids.len() as u32;
-    
-    // Log the correlation request for debugging
-    info!("✅ Creating {} correlations for threat event: {}", correlations_created, request.threat_event_id);
-    info!("   Correlation type: {}", request.correlation_type);
-    if let Some(reason) = &request.correlation_reason {
-        info!("   Correlation reason: {}", reason);
+    // Parse the threat event ID
+    let threat_event_uuid = match uuid::Uuid::parse_str(&request.threat_event_id) {
+        Ok(uuid) => uuid,
+        Err(_) => return Ok(ResponseJson(CorrelationResponse {
+            success: false,
+            message: "Invalid threat event ID format".to_string(),
+            correlations_created: 0,
+        }))
+    };
+
+    // Verify the threat event exists
+    let event_exists = sqlx::query("SELECT id FROM threat_events WHERE id = $1")
+        .bind(threat_event_uuid)
+        .fetch_optional(state.database.get_pool())
+        .await;
+
+    if event_exists.is_err() || event_exists.unwrap().is_none() {
+        return Ok(ResponseJson(CorrelationResponse {
+            success: false,
+            message: "威胁事件不存在".to_string(),
+            correlations_created: 0,
+        }));
     }
-    info!("   Alert IDs: {:?}", request.alert_data_ids);
+
+    let mut correlations_created = 0;
+    let correlation_id = uuid::Uuid::new_v4();
     
-    // TODO: Implement actual database storage of correlations
-    // For now, just return success to allow testing of the UI
+    // Insert correlations for each alert
+    for alert_id in &request.alert_data_ids {
+        let insert_sql = r#"
+            INSERT INTO threat_correlations 
+            (id, threat_event_id, alert_data_id, correlation_type, correlation_reason, created_by)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            ON CONFLICT (threat_event_id, alert_data_id) DO NOTHING
+        "#;
+        
+        match sqlx::query(insert_sql)
+            .bind(uuid::Uuid::new_v4())
+            .bind(threat_event_uuid)
+            .bind(alert_id)
+            .bind(&request.correlation_type)
+            .bind(&request.correlation_reason)
+            .bind(user.id)
+            .execute(state.database.get_pool())
+            .await
+        {
+            Ok(result) => {
+                if result.rows_affected() > 0 {
+                    correlations_created += 1;
+                }
+            },
+            Err(e) => {
+                error!("Failed to create correlation for alert {}: {}", alert_id, e);
+            }
+        }
+    }
+    
+    info!("✅ Created {} correlations for threat event: {}", correlations_created, request.threat_event_id);
     
     Ok(ResponseJson(CorrelationResponse {
         success: true,

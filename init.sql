@@ -464,17 +464,18 @@ CREATE INDEX IF NOT EXISTS idx_alert_annotations_labels ON alert_annotations USI
 CREATE INDEX IF NOT EXISTS idx_alert_annotations_mitre_techniques ON alert_annotations USING GIN (mitre_techniques);
 
 -- ================================
--- 4. 威胁事件关联表 (threat_event_alerts)
+-- 4. 威胁事件关联表 (threat_correlations)
 -- ================================
-CREATE TABLE IF NOT EXISTS threat_event_alerts (
+CREATE TABLE IF NOT EXISTS threat_correlations (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     
     -- 关联关系
     threat_event_id UUID NOT NULL REFERENCES threat_events(id) ON DELETE CASCADE,
-    alert_data_id UUID NOT NULL REFERENCES alert_data(id) ON DELETE CASCADE,
+    alert_data_id VARCHAR(255) NOT NULL,                 -- 告警ID (字符串格式，不使用外键约束)
     
     -- 关联信息
     correlation_type VARCHAR(50) NOT NULL,                -- 关联类型 (temporal, spatial, indicator, behavior, etc.)
+    correlation_reason TEXT,                              -- 关联原因描述
     correlation_score DECIMAL(3,2) CHECK (correlation_score BETWEEN 0 AND 1.0), -- 关联度分数
     
     -- 在威胁事件中的角色
@@ -482,7 +483,6 @@ CREATE TABLE IF NOT EXISTS threat_event_alerts (
     sequence_order INTEGER,                               -- 时间序列顺序
     
     -- 关联依据
-    correlation_reason TEXT,                              -- 关联原因描述
     correlation_evidence JSONB,                           -- 关联证据 (共同IOCs, 相同设备, 时间邻近等)
     
     -- 元数据
@@ -494,21 +494,21 @@ CREATE TABLE IF NOT EXISTS threat_event_alerts (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     
-    -- 唯一约束
+    -- 唯一约束 (防止重复关联)
     UNIQUE(threat_event_id, alert_data_id)
 );
 
 -- 创建威胁事件关联索引
-CREATE INDEX IF NOT EXISTS idx_threat_event_alerts_threat_event_id ON threat_event_alerts (threat_event_id);
-CREATE INDEX IF NOT EXISTS idx_threat_event_alerts_alert_data_id ON threat_event_alerts (alert_data_id);
-CREATE INDEX IF NOT EXISTS idx_threat_event_alerts_correlation_type ON threat_event_alerts (correlation_type);
-CREATE INDEX IF NOT EXISTS idx_threat_event_alerts_correlation_score ON threat_event_alerts (correlation_score);
-CREATE INDEX IF NOT EXISTS idx_threat_event_alerts_sequence_order ON threat_event_alerts (sequence_order);
-CREATE INDEX IF NOT EXISTS idx_threat_event_alerts_created_by ON threat_event_alerts (created_by);
-CREATE INDEX IF NOT EXISTS idx_threat_event_alerts_created_at ON threat_event_alerts (created_at);
+CREATE INDEX IF NOT EXISTS idx_threat_correlations_threat_event_id ON threat_correlations (threat_event_id);
+CREATE INDEX IF NOT EXISTS idx_threat_correlations_alert_data_id ON threat_correlations (alert_data_id);
+CREATE INDEX IF NOT EXISTS idx_threat_correlations_correlation_type ON threat_correlations (correlation_type);
+CREATE INDEX IF NOT EXISTS idx_threat_correlations_correlation_score ON threat_correlations (correlation_score);
+CREATE INDEX IF NOT EXISTS idx_threat_correlations_sequence_order ON threat_correlations (sequence_order);
+CREATE INDEX IF NOT EXISTS idx_threat_correlations_created_by ON threat_correlations (created_by);
+CREATE INDEX IF NOT EXISTS idx_threat_correlations_created_at ON threat_correlations (created_at);
 
 -- GIN索引
-CREATE INDEX IF NOT EXISTS idx_threat_event_alerts_correlation_evidence ON threat_event_alerts USING GIN (correlation_evidence);
+CREATE INDEX IF NOT EXISTS idx_threat_correlations_correlation_evidence ON threat_correlations USING GIN (correlation_evidence);
 
 -- ================================
 -- 5. 威胁事件时间线表 (threat_event_timeline)
@@ -564,7 +564,7 @@ CREATE TRIGGER update_alert_annotations_updated_at
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
 
-CREATE TRIGGER update_threat_event_alerts_updated_at
-    BEFORE UPDATE ON threat_event_alerts
+CREATE TRIGGER update_threat_correlations_updated_at
+    BEFORE UPDATE ON threat_correlations
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
