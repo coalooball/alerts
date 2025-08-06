@@ -30,6 +30,18 @@ This is a Rust-based cybersecurity alert processing system that uses Apache Kafk
 - `make dev-backend` - Build backend in development mode
 - `make init-db` - Initialize database schema (drop and recreate)
 
+### Database Access
+- **Direct psql access**: Use Docker container for database queries:
+  ```bash
+  # Using docker-compose (if postgres service is running)
+  sudo docker-compose -f docker/docker-compose.pg.yml exec postgres psql -U postgres -d alert_server -c "SELECT * FROM threat_events LIMIT 5;"
+  
+  # Using docker exec with container name
+  sudo docker exec postgres-db psql -U postgres -d alert_server -c "SELECT * FROM threat_events LIMIT 5;"
+  ```
+- **sudo password**: `root@123`
+- **Container name**: `postgres-db`
+
 ## Authentication System
 
 ### Login Credentials

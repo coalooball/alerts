@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import '../App.css';
+import { useAuth } from '../contexts/AuthContext';
 
 const ThreatEventList = () => {
+  const { sessionToken } = useAuth();
   const [threatEvents, setThreatEvents] = useState([]);
   const [loading, setLoading] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -47,7 +49,12 @@ const ThreatEventList = () => {
         }
       });
 
-      const response = await fetch(`/api/threat-events?${params.toString()}`);
+      const response = await fetch(`/api/threat-events?${params.toString()}`, {
+        headers: {
+          'Authorization': `Bearer ${sessionToken}`,
+          'Content-Type': 'application/json',
+        },
+      });
       const data = await response.json();
       
       if (data.success) {
@@ -147,6 +154,7 @@ const ThreatEventList = () => {
       const response = await fetch('/api/threat-events', {
         method: 'POST',
         headers: {
+          'Authorization': `Bearer ${sessionToken}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(newEvent),
@@ -182,7 +190,12 @@ const ThreatEventList = () => {
   // 查看威胁事件详情
   const viewEventDetail = async (eventId) => {
     try {
-      const response = await fetch(`/api/threat-events/${eventId}`);
+      const response = await fetch(`/api/threat-events/${eventId}`, {
+        headers: {
+          'Authorization': `Bearer ${sessionToken}`,
+          'Content-Type': 'application/json',
+        },
+      });
       const data = await response.json();
       
       if (data.success) {
