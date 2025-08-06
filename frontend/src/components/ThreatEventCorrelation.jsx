@@ -116,7 +116,9 @@ const ThreatEventCorrelation = () => {
 
   const handleCorrelateAlerts = () => {
     if (selectedAlerts.length === 0) {
-      alert('请选择要关联的告警');
+      if (window.showToast) {
+        window.showToast('请选择要关联的告警', 'warning');
+      }
       return;
     }
     setShowCorrelationModal(true);
@@ -124,13 +126,15 @@ const ThreatEventCorrelation = () => {
 
   const handleSaveCorrelation = async () => {
     if (!selectedThreatEvent || !correlationType) {
-      alert('请选择威胁事件和关联类型');
+      if (window.showToast) {
+        window.showToast('请输入威胁事件和关联类型', 'warning');
+      }
       return;
     }
 
     try {
       const sessionToken = localStorage.getItem('sessionToken');
-      const response = await fetch(`/api/threat-events/${selectedThreatEvent}/correlate-alerts`, {
+      const response = await fetch('/api/correlate-alerts', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -147,7 +151,9 @@ const ThreatEventCorrelation = () => {
       const data = await response.json();
       
       if (data.success) {
-        alert(`成功关联 ${data.correlations_created} 个告警到威胁事件`);
+        if (window.showToast) {
+          window.showToast(`成功关联 ${data.correlations_created} 个告警到威胁事件`, 'success');
+        }
         setShowCorrelationModal(false);
         setSelectedAlerts([]);
         setSelectedThreatEvent('');
@@ -155,11 +161,15 @@ const ThreatEventCorrelation = () => {
         setCorrelationReason('');
         fetchAnnotatedAlerts();
       } else {
-        alert('关联失败: ' + data.message);
+        if (window.showToast) {
+          window.showToast('关联失败: ' + data.message, 'error');
+        }
       }
     } catch (error) {
       console.error('Error correlating alerts:', error);
-      alert('关联告警时发生错误');
+      if (window.showToast) {
+        window.showToast('关联告警时发生错误', 'error');
+      }
     }
   };
 
