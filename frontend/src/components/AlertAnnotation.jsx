@@ -1,13 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import '../App.css';
+import { useAuth } from '../contexts/AuthContext';
 
 const AlertAnnotation = () => {
+  const { sessionToken } = useAuth();
   const [activeTab, setActiveTab] = useState('alert-data');
   const [alertData, setAlertData] = useState([]);
   const [annotations, setAnnotations] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selectedAlert, setSelectedAlert] = useState(null);
   const [showAnnotationModal, setShowAnnotationModal] = useState(false);
+  const [selectedAnnotation, setSelectedAnnotation] = useState(null);
+  const [showAnnotationDetailModal, setShowAnnotationDetailModal] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage] = useState(20);
   const [searchFilters, setSearchFilters] = useState({
@@ -33,7 +37,12 @@ const AlertAnnotation = () => {
         }
       });
 
-      const response = await fetch(`/api/alert-data?${params.toString()}`);
+      const response = await fetch(`/api/alert-data?${params.toString()}`, {
+        headers: {
+          'Authorization': `Bearer ${sessionToken}`,
+          'Content-Type': 'application/json',
+        },
+      });
       const data = await response.json();
       
       if (data.success) {
@@ -58,7 +67,12 @@ const AlertAnnotation = () => {
       params.append('limit', itemsPerPage.toString());
       params.append('offset', ((currentPage - 1) * itemsPerPage).toString());
 
-      const response = await fetch(`/api/annotations?${params.toString()}`);
+      const response = await fetch(`/api/annotations?${params.toString()}`, {
+        headers: {
+          'Authorization': `Bearer ${sessionToken}`,
+          'Content-Type': 'application/json',
+        },
+      });
       const data = await response.json();
       
       if (data.success) {
@@ -142,6 +156,33 @@ const AlertAnnotation = () => {
   const closeAnnotationModal = () => {
     setSelectedAlert(null);
     setShowAnnotationModal(false);
+  };
+
+  // 查看标注详情
+  const viewAnnotationDetail = async (annotationId) => {
+    try {
+      const response = await fetch(`/api/annotations/${annotationId}`, {
+        headers: {
+          'Authorization': `Bearer ${sessionToken}`,
+          'Content-Type': 'application/json',
+        },
+      });
+      const data = await response.json();
+      
+      if (data.success) {
+        setSelectedAnnotation(data.annotation);
+        setShowAnnotationDetailModal(true);
+      } else {
+        console.error('Failed to fetch annotation detail');
+      }
+    } catch (error) {
+      console.error('Error fetching annotation detail:', error);
+    }
+  };
+
+  const closeAnnotationDetailModal = () => {
+    setSelectedAnnotation(null);
+    setShowAnnotationDetailModal(false);
   };
 
   const renderAlertDataTab = () => (
@@ -401,7 +442,12 @@ const AlertAnnotation = () => {
                       </span>
                     </td>
                     <td className="action-cell">
-                      <button className="view-button">👁️ 查看</button>
+                      <button 
+                        className="view-button"
+                        onClick={() => viewAnnotationDetail(annotation.id)}
+                      >
+                        👁️ 查看
+                      </button>
                     </td>
                   </tr>
                 ))
@@ -530,6 +576,149 @@ const AlertAnnotation = () => {
     );
   };
 
+  // 标注详情模态框
+  const renderAnnotationDetailModal = () => {
+    if (!showAnnotationDetailModal || !selectedAnnotation) return null;
+
+    return (
+      <div className="modal-overlay" onClick={closeAnnotationDetailModal}>
+        <div className="modal-content annotation-detail-modal" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-header">
+            <h3>标注详情</h3>
+            <button className="close-button" onClick={closeAnnotationDetailModal}>
+              ✕
+            </button>
+          </div>
+          
+          <div className="modal-body">
+            <div className="annotation-detail-section">
+              <h4>基本信息</h4>
+              <div className="detail-grid">
+                <div className="detail-item">
+                  <label>标注时间:</label>
+                  <span>{formatTimestamp(selectedAnnotation.annotated_at)}</span>
+                </div>
+                <div className="detail-item">
+                  <label>标注人:</label>
+                  <span>{selectedAnnotation.annotated_by_username || '-'}</span>
+                </div>
+                <div className="detail-item">
+                  <label>标注类型:</label>
+                  <span>{selectedAnnotation.annotation_type || '-'}</span>
+                </div>
+                <div className="detail-item">
+                  <label>威胁等级:</label>
+                  <span className={`threat-level-badge ${selectedAnnotation.threat_level}`}>
+                    {selectedAnnotation.threat_level || '-'}
+                  </span>
+                </div>
+                <div className="detail-item">
+                  <label>恶意性判断:</label>
+                  <span>
+                    {selectedAnnotation.is_malicious === null ? '未判断' : 
+                     selectedAnnotation.is_malicious ? '✅ 恶意' : '❌ 良性'}
+                  </span>
+                </div>
+                <div className="detail-item">
+                  <label>审核状态:</label>
+                  <span className={`review-status-badge ${selectedAnnotation.review_status}`}>
+                    {selectedAnnotation.review_status === 'pending' ? '待审核' :
+                     selectedAnnotation.review_status === 'approved' ? '已通过' : '已拒绝'}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {selectedAnnotation.annotation_title && (
+              <div className="annotation-detail-section">
+                <h4>标注标题</h4>
+                <p>{selectedAnnotation.annotation_title}</p>
+              </div>
+            )}
+
+            {selectedAnnotation.annotation_description && (
+              <div className="annotation-detail-section">
+                <h4>详细描述</h4>
+                <p>{selectedAnnotation.annotation_description}</p>
+              </div>
+            )}
+
+            {selectedAnnotation.mitre_techniques && selectedAnnotation.mitre_techniques.length > 0 && (
+              <div className="annotation-detail-section">
+                <h4>MITRE 技术</h4>
+                <div className="mitre-techniques">
+                  {selectedAnnotation.mitre_techniques.map((technique, index) => (
+                    <span key={index} className="mitre-badge">{technique}</span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {selectedAnnotation.attack_phases && selectedAnnotation.attack_phases.length > 0 && (
+              <div className="annotation-detail-section">
+                <h4>攻击阶段</h4>
+                <div className="attack-phases">
+                  {selectedAnnotation.attack_phases.map((phase, index) => (
+                    <span key={index} className="phase-badge">{phase}</span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {selectedAnnotation.notes && (
+              <div className="annotation-detail-section">
+                <h4>备注</h4>
+                <p>{selectedAnnotation.notes}</p>
+              </div>
+            )}
+
+            {selectedAnnotation.alert_data && (
+              <div className="annotation-detail-section">
+                <h4>关联告警信息</h4>
+                <div className="detail-grid">
+                  <div className="detail-item">
+                    <label>告警ID:</label>
+                    <span>{selectedAnnotation.alert_data_id}</span>
+                  </div>
+                  <div className="detail-item">
+                    <label>告警类型:</label>
+                    <span>{selectedAnnotation.alert_data.alert_type || '-'}</span>
+                  </div>
+                  <div className="detail-item">
+                    <label>设备名称:</label>
+                    <span>{selectedAnnotation.alert_data.device_name || '-'}</span>
+                  </div>
+                  <div className="detail-item">
+                    <label>严重程度:</label>
+                    <span 
+                      className="severity-badge"
+                      style={{ backgroundColor: getSeverityColor(selectedAnnotation.alert_data.severity) }}
+                    >
+                      {getSeverityText(selectedAnnotation.alert_data.severity)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {selectedAnnotation.review_notes && (
+              <div className="annotation-detail-section">
+                <h4>审核备注</h4>
+                <p>{selectedAnnotation.review_notes}</p>
+              </div>
+            )}
+          </div>
+
+          <div className="modal-footer">
+            <button className="close-button" onClick={closeAnnotationDetailModal}>
+              关闭
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="alert-annotation-container">
       <div className="alert-annotation-main-header">
@@ -554,6 +743,7 @@ const AlertAnnotation = () => {
       {activeTab === 'annotations' && renderAnnotationsTab()}
       
       {renderAnnotationModal()}
+      {renderAnnotationDetailModal()}
     </div>
   );
 };
