@@ -17,18 +17,24 @@ This is a Rust-based cybersecurity alert processing system that uses Apache Kafk
 - `cargo run --bin web-server` - Run the Axum web server with React frontend on http://localhost:3000
 - `cargo run --bin web-server -- --init` - Initialize database (drops and recreates `alert_server` database)
 - `cargo run --bin web-server -- --port 8080` - Run web server on custom port
+- `cargo run --bin hash-password <password>` - Generate bcrypt hash for user passwords
 - `cargo test` - Run tests
+- `cargo test <test_name>` - Run a specific test
 - `make build` - Build both frontend and backend
-- `make start` - Build and start the web server
+- `make start` - Build and start the web server  
 - `make quick` - Quick development build and start
+- `make restart` - Stop and restart the web server
 
 ### Development
 - `cargo check` - Quick syntax and type checking
 - `cargo fmt` - Format code using rustfmt
 - `cargo clippy` - Run the Clippy linter for additional checks
+- `make dev` - Build development version (backend + frontend)
 - `make dev-frontend` - Start frontend development server (Vite)
 - `make dev-backend` - Build backend in development mode
-- `make init-db` - Initialize database schema (drop and recreate)
+- `make start-dev` - Start web server with development build
+- `make init-db` - Initialize database schema (drop and recreate with release build)
+- `make init-db-dev` - Initialize database schema (drop and recreate with dev build)
 
 ### Database Access
 - **Direct psql access**: Use Docker container for database queries:
@@ -74,6 +80,13 @@ localStorage.removeItem('sessionToken'); window.location.reload();
 3. **NgavAlert** (`src/ngav_alert.rs`): Carbon Black NGAV (Next-Gen Antivirus) alert structure
    - Includes threat categorization, MITRE ATT&CK mapping, and policy enforcement status
    - Methods for threat analysis, MITRE TTP extraction, and blocked threat detection
+
+### Authentication System (`src/auth.rs`)
+The web server includes a JWT-based authentication system with session management:
+- User credentials stored in PostgreSQL `users` table with bcrypt-hashed passwords
+- JWT tokens for session management with 24-hour expiration
+- Session tracking in `sessions` table with automatic cleanup
+- Protected API endpoints require valid authentication tokens
 
 ### Kafka Infrastructure
 
@@ -188,7 +201,7 @@ Axum-based web server with React frontend for comprehensive alert management:
 
 ## Web API Endpoints
 
-The web server provides the following REST API endpoints:
+The web server provides the following REST API endpoints (all require authentication except `/api/auth/*`):
 
 ### Configuration Management
 - `GET /api/config` - Get current active Kafka configuration (first active)
@@ -218,6 +231,11 @@ The web server provides the following REST API endpoints:
 - `GET /api/consumer-service/status` - Get consumer service status
 - `POST /api/consumer-service/start` - Start background consumer service
 - `POST /api/consumer-service/stop` - Stop background consumer service
+
+### Authentication
+- `POST /api/auth/login` - Login with username/password, returns JWT token
+- `POST /api/auth/logout` - Logout and invalidate session
+- `GET /api/auth/me` - Get current user information
 
 ## Frontend Development
 
@@ -313,14 +331,15 @@ Key directories and files:
   - `alert.rs` - Generic alert structure with factory methods
   - `edr_alert.rs` - Carbon Black EDR alert definitions  
   - `ngav_alert.rs` - Carbon Black NGAV alert definitions
+  - `auth.rs` - Authentication service with JWT and bcrypt
   - `kafka/` - Kafka producer/consumer implementation
   - `database.rs` - PostgreSQL connection and configuration management
   - `clickhouse.rs` - ClickHouse client for alert storage
   - `consumer_service.rs` - Background service for message processing
-  - `bin/` - Executable binaries (kafka-sender, kafka-consumer, web-server)
+  - `bin/` - Executable binaries (kafka-sender, kafka-consumer, web-server, hash-password)
 - `frontend/` - React web interface with Vite build system
 - `atlasv2/data/attack/` - Cybersecurity datasets organized by scenarios
-- `init.sql` - PostgreSQL database initialization script
+- `init.sql` - PostgreSQL database initialization script (includes user tables)
 - `clickhouse_init.sql` - ClickHouse table creation script
 - `config.toml` - Default Kafka configuration (fallback)
 - `Makefile` - Build automation for frontend/backend
