@@ -25,15 +25,15 @@ const LoginForm = () => {
     const errors = {};
     
     if (!credentials.username.trim()) {
-      errors.username = 'Username is required';
+      errors.username = '用户名不能为空';
     } else if (credentials.username.length < 3) {
-      errors.username = 'Username must be at least 3 characters';
+      errors.username = '用户名至少需要3个字符';
     }
     
     if (!credentials.password) {
-      errors.password = 'Password is required';
+      errors.password = '密码不能为空';
     } else if (credentials.password.length < 6) {
-      errors.password = 'Password must be at least 6 characters';
+      errors.password = '密码至少需要6个字符';
     }
     
     setValidationErrors(errors);
@@ -54,13 +54,13 @@ const LoginForm = () => {
     try {
       await login(credentials.username.trim(), credentials.password);
     } catch (err) {
-      let errorMessage = 'Login failed';
+      let errorMessage = '登录失败';
       
       if (err.message) {
         if (err.message.includes('Invalid credentials')) {
-          errorMessage = 'Invalid username or password';
+          errorMessage = '用户名或密码错误';
         } else if (err.message.includes('Network')) {
-          errorMessage = 'Network error. Please check your connection.';
+          errorMessage = '网络错误，请检查您的网络连接';
         } else {
           errorMessage = err.message;
         }
@@ -102,9 +102,9 @@ const LoginForm = () => {
     <div className="login-container">
       <div className="login-form-wrapper">
         <div className="login-header">
-          <h1 className="system-title">🚨 Security Alert System</h1>
-          <h2 className="login-title">Welcome Back</h2>
-          <p className="login-subtitle">Please sign in to access the dashboard</p>
+          <h1 className="system-title">🚨 安全告警系统</h1>
+          <h2 className="login-title">欢迎回来</h2>
+          <p className="login-subtitle">请登录以访问控制台</p>
         </div>
 
         <form onSubmit={handleSubmit} className="enhanced-login-form" noValidate>
@@ -117,7 +117,7 @@ const LoginForm = () => {
 
           <div className="form-group">
             <label htmlFor="username" className="form-label">
-              Username
+              用户名
               <span className="required-asterisk" aria-label="required">*</span>
             </label>
             <div className={`input-wrapper ${focusedField === 'username' ? 'focused' : ''} ${validationErrors.username ? 'error' : ''}`}>
@@ -133,7 +133,7 @@ const LoginForm = () => {
                 required
                 disabled={isLoading}
                 className="form-input"
-                placeholder="Enter your username"
+                placeholder="请输入用户名"
                 autoComplete="username"
                 aria-describedby={validationErrors.username ? "username-error" : undefined}
                 aria-invalid={validationErrors.username ? "true" : "false"}
@@ -148,7 +148,7 @@ const LoginForm = () => {
 
           <div className="form-group">
             <label htmlFor="password" className="form-label">
-              Password
+              密码
               <span className="required-asterisk" aria-label="required">*</span>
             </label>
             <div className={`input-wrapper ${focusedField === 'password' ? 'focused' : ''} ${validationErrors.password ? 'error' : ''}`}>
@@ -164,7 +164,7 @@ const LoginForm = () => {
                 required
                 disabled={isLoading}
                 className="form-input"
-                placeholder="Enter your password"
+                placeholder="请输入密码"
                 autoComplete="current-password"
                 aria-describedby={validationErrors.password ? "password-error" : undefined}
                 aria-invalid={validationErrors.password ? "true" : "false"}
@@ -174,7 +174,7 @@ const LoginForm = () => {
                 className="password-toggle"
                 onClick={() => setShowPassword(!showPassword)}
                 disabled={isLoading}
-                aria-label={showPassword ? "Hide password" : "Show password"}
+                aria-label={showPassword ? "隐藏密码" : "显示密码"}
               >
                 {showPassword ? '🙈' : '👁️'}
               </button>
@@ -195,24 +195,24 @@ const LoginForm = () => {
             {isLoading ? (
               <>
                 <span className="loading-spinner"></span>
-                Signing in...
+                登录中...
               </>
             ) : (
               <>
                 <span className="login-icon">🚀</span>
-                Sign In
+                登录
               </>
             )}
           </button>
 
           <div id="login-status" className="sr-only" aria-live="polite">
-            {isLoading ? 'Signing in, please wait...' : ''}
+            {isLoading ? '正在登录，请稍候...' : ''}
           </div>
         </form>
 
         <div className="login-info">
           <div className="login-help">
-            <p>Need help? Contact your system administrator</p>
+            <p>需要帮助？请联系系统管理员</p>
           </div>
         </div>
       </div>

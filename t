@@ -1,0 +1,11 @@
+stone
+dirt
+diorite
+tuff
+deepslate
+smooth_basalt
+cobbled_deepslate
+calcite
+andesite
+gravel
+granite

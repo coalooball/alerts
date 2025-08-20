@@ -2358,7 +2358,7 @@ select.input {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #60a5fa 0%, #1e40af 100%);
   padding: 2rem;
   position: relative;
 }
@@ -2386,7 +2386,7 @@ select.input {
 }
 
 .login-header {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #3b82f6 0%, #1e40af 100%);
   color: white;
   padding: 2.5rem 2rem 2rem;
   text-align: center;
@@ -2447,8 +2447,8 @@ select.input {
 }
 
 .input-wrapper.focused {
-  border-color: #667eea;
-  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
 }
 
 .input-wrapper.error {
@@ -2496,7 +2496,7 @@ select.input {
 }
 
 .password-toggle:hover:not(:disabled) {
-  color: #667eea;
+  color: #3b82f6;
 }
 
 .password-toggle:disabled {
@@ -2521,7 +2521,7 @@ select.input {
 .enhanced-login-button {
   width: 100%;
   padding: 1rem;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #3b82f6 0%, #1e40af 100%);
   color: white;
   border: none;
   border-radius: 8px;
@@ -2557,7 +2557,7 @@ select.input {
 
 .enhanced-login-button:hover:not(:disabled) {
   transform: translateY(-2px);
-  box-shadow: 0 8px 25px rgba(102, 126, 234, 0.3);
+  box-shadow: 0 8px 25px rgba(59, 130, 246, 0.3);
 }
 
 .enhanced-login-button:active:not(:disabled) {
@@ -2903,7 +2903,7 @@ select.input {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #60a5fa 0%, #1e40af 100%);
   padding: 2rem;
   position: relative;
   overflow: hidden;
@@ -3092,7 +3092,7 @@ select.input {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #3b82f6 0%, #1e40af 100%);
   color: white;
 }
 

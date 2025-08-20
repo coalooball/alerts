@@ -114,7 +114,7 @@ kafka-sender [OPTIONS] --bootstrap-servers <SERVERS> --topic <TOPIC> --group-id 
 
 # Send generic alerts with verbose logging for debugging
 ./target/debug/kafka-sender \
-  --bootstrap-servers 10.26.64.224:9093 \
+  --bootstrap-servers 127.0.0.1:9092 \
   --topic alerts-ngav \
   --group-id 2 \
   --data fixtures/ngav-alerts-test-10k.jsonl \
