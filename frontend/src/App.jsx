@@ -16,6 +16,7 @@ import ClickHouseConfig from './components/ClickHouseConfig';
 import DataSourceConfig from './components/DataSourceConfig';
 import AlertData from './components/AlertData';
 import AlertAnnotation from './components/AlertAnnotation';
+import AlertGraphPage from './components/AlertGraphPage';
 import ThreatEventList from './components/ThreatEventList';
 import ThreatEventCorrelation from './components/ThreatEventCorrelation';
 import ThreatEventAnalysis from './components/ThreatEventAnalysis';
@@ -209,6 +210,11 @@ const AppContent = () => {
                 🚨 告警数据
               </button>
             </li>
+            <li className={activeView === 'alert-graph' ? 'active' : ''}>
+              <button onClick={() => setActiveView('alert-graph')}>
+                🔗 告警数据图谱
+              </button>
+            </li>
             <li className={activeView === 'threats' ? 'active' : ''}>
               <button onClick={() => setActiveView('threats')}>
                 🛡️ 威胁事件
@@ -244,6 +250,7 @@ const AppContent = () => {
             />
           )}
           {activeView === 'alerts' && <AlertData />}
+          {activeView === 'alert-graph' && <AlertGraphPage />}
           {activeView === 'threats' && renderThreatEventPage()}
           {activeView === 'logs' && <Logs />}
           {activeView === 'config' && renderConfigPage()}

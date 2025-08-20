@@ -121,6 +121,29 @@ init-db-dev: dev-backend
 # Quick development workflow
 quick: dev-backend build-frontend start-dev
 
+# Neo4j Graph Database
+neo4j-start:
+	@echo "🚀 Starting Neo4j graph database..."
+	@chmod +x scripts/start_neo4j.sh
+	@./scripts/start_neo4j.sh
+
+neo4j-stop:
+	@echo "🛑 Stopping Neo4j..."
+	docker-compose -f docker/docker-compose.neo4j.yml down
+
+neo4j-logs:
+	@echo "📋 Neo4j logs..."
+	docker logs -f neo4j-alerts
+
+neo4j-shell:
+	@echo "🔧 Entering Neo4j shell..."
+	docker exec -it neo4j-alerts cypher-shell -u neo4j -p alerts123
+
+neo4j-clean:
+	@echo "🧹 Cleaning Neo4j data..."
+	docker-compose -f docker/docker-compose.neo4j.yml down -v
+	rm -rf docker/neo4j/data/*
+
 # Help
 help:
 	@echo "Available targets:"
@@ -152,6 +175,13 @@ help:
 	@echo "  create-db    - Create alert_server database"
 	@echo "  init-db      - Initialize PostgreSQL & ClickHouse (drop & recreate, release build)"
 	@echo "  init-db-dev  - Initialize PostgreSQL & ClickHouse (drop & recreate, dev build)"
+	@echo ""
+	@echo "Neo4j Graph Database:"
+	@echo "  neo4j-start  - Start Neo4j database"
+	@echo "  neo4j-stop   - Stop Neo4j database"
+	@echo "  neo4j-logs   - View Neo4j logs"
+	@echo "  neo4j-shell  - Enter Neo4j Cypher shell"
+	@echo "  neo4j-clean  - Clean Neo4j data"
 	@echo ""
 	@echo "Cleanup:"
 	@echo "  clean        - Clean all build artifacts"

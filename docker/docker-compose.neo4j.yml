@@ -1,0 +1,36 @@
+version: '3.8'
+
+services:
+  neo4j:
+    image: neo4j:5-community
+    container_name: neo4j-alerts
+    restart: unless-stopped
+    ports:
+      - "7474:7474"  # HTTP界面
+      - "7687:7687"  # Bolt协议
+    environment:
+      # 认证配置
+      - NEO4J_AUTH=neo4j/alerts123
+      # 数据库配置
+      - NEO4J_dbms_default__database=alerts
+      # 内存配置 (根据你的服务器调整)
+      - NEO4J_dbms_memory_pagecache_size=2G
+      - NEO4J_dbms_memory_heap_initial__size=1G
+      - NEO4J_dbms_memory_heap_max__size=2G
+      # 启用APOC插件（高级功能）
+      - NEO4JLABS_PLUGINS=["apoc"]
+      # 安全配置
+      - NEO4J_dbms_security_procedures_unrestricted=apoc.*
+      - NEO4J_dbms_security_procedures_allowlist=apoc.*
+    volumes:
+      - ./neo4j/data:/data
+      - ./neo4j/logs:/logs
+      - ./neo4j/import:/import
+      - ./neo4j/plugins:/plugins
+    networks:
+      - alerts-network
+
+networks:
+  alerts-network:
+    driver: bridge
+    name: alerts-network

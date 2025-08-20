@@ -6,6 +6,10 @@ pub mod database;
 pub mod clickhouse;
 pub mod consumer_service;
 pub mod auth;
+pub mod neo4j_client;
+pub mod graph_api;
+pub mod graph_memory;
+pub mod graph_db;
 
 pub use kafka::{KafkaProducer, KafkaConsumer, KafkaConfig};
 pub use alert::AlertMessage;
