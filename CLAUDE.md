@@ -4,7 +4,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Rust-based cybersecurity alert processing system that uses Apache Kafka for message streaming and ClickHouse for alert storage. The application processes security alerts from various sources (EDR, NGAV, DNS, Sysmon, etc.) and provides a web interface for configuration management and alert monitoring.
+This is a Rust-based cybersecurity alert processing system that uses Apache Kafka for message streaming and ClickHouse for alert storage. The application processes security alerts from various sources (EDR, NGAV, DNS, Sysmon, etc.) and provides a web interface for configuration management, alert monitoring, and threat event analysis.
+
+The system includes:
+- Real-time alert streaming and processing pipeline
+- Threat event correlation and analysis capabilities
+- Web-based configuration management and monitoring dashboard
+- Support for multiple simultaneous Kafka configurations
+- Advanced threat event management with MITRE ATT&CK framework integration
 
 ## Key Commands
 
@@ -80,6 +87,23 @@ localStorage.removeItem('sessionToken'); window.location.reload();
 3. **NgavAlert** (`src/ngav_alert.rs`): Carbon Black NGAV (Next-Gen Antivirus) alert structure
    - Includes threat categorization, MITRE ATT&CK mapping, and policy enforcement status
    - Methods for threat analysis, MITRE TTP extraction, and blocked threat detection
+
+### Threat Event System
+
+The system includes comprehensive threat event management stored in PostgreSQL:
+
+1. **threat_events** table: Main threat event tracking with:
+   - Severity levels (critical, high, medium, low, info)
+   - Status tracking (new, in_progress, resolved, false_positive)
+   - MITRE ATT&CK technique mapping
+   - IOC (Indicators of Compromise) storage
+   - Affected devices tracking
+   - Automated and manual creation methods
+
+2. **Related Tables**:
+   - **threat_event_alert_mappings**: Links alerts to threat events
+   - **threat_event_timeline**: Event timeline with automated/manual entries
+   - Support for event correlation and analysis workflows
 
 ### Authentication System (`src/auth.rs`)
 The web server includes a JWT-based authentication system with session management:
@@ -243,7 +267,18 @@ The React frontend is located in `frontend/` directory:
 - `cd frontend && npm install` - Install dependencies
 - `npm run dev` - Start development server (with proxy to backend)
 - `npm run build` - Build for production (outputs to `frontend/dist/`)
-- Frontend provides UI for Kafka/ClickHouse configuration, connectivity testing, and real-time alert monitoring
+
+### Frontend Components
+Key React components for the UI:
+- **AlertAnalysis.jsx**: Alert analysis and visualization
+- **AlertAnnotation.jsx**: Alert annotation and enrichment interface
+- **AlertData.jsx**: Alert data display and management
+- **ThreatEventList.jsx**: Threat event listing and management
+- **ThreatEventCorrelation.jsx**: Event correlation analysis
+- **LoginForm.jsx**: Authentication interface
+- **KafkaConfig.jsx** & **ClickHouseConfig.jsx**: Configuration management
+- **SecuritySettingsModal.jsx**: Security configuration
+- **ProfileSettingsModal.jsx**: User profile management
 
 ## Runtime Requirements
 
@@ -338,8 +373,12 @@ Key directories and files:
   - `consumer_service.rs` - Background service for message processing
   - `bin/` - Executable binaries (kafka-sender, kafka-consumer, web-server, hash-password)
 - `frontend/` - React web interface with Vite build system
+  - `src/components/` - React components for UI functionality
+  - `src/App.jsx` - Main application component with routing
+  - `src/api.js` - API client for backend communication
 - `atlasv2/data/attack/` - Cybersecurity datasets organized by scenarios
-- `init.sql` - PostgreSQL database initialization script (includes user tables)
+- `gaojing/` - Prototype UI mockups (墨刀/Modao) for security dashboard visualization
+- `init.sql` - PostgreSQL database initialization script (includes user and threat_events tables)
 - `clickhouse_init.sql` - ClickHouse table creation script
 - `config.toml` - Default Kafka configuration (fallback)
 - `Makefile` - Build automation for frontend/backend
