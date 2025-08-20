@@ -5,3 +5,6 @@ atlasv2
 frontend/dist/
 frontend/node_modules/
 *.log
+
+# Neo4j data
+docker/neo4j/
