@@ -4,6 +4,7 @@ pub mod edr_alert;
 pub mod ngav_alert;
 pub mod database;
 pub mod clickhouse;
+pub mod clickhouse_api;
 pub mod consumer_service;
 pub mod auth;
 pub mod neo4j_client;

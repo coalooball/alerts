@@ -45,42 +45,57 @@ const AlertGraphPage = () => {
     return mockAlerts;
   };
 
-  // 获取告警列表
-  const fetchAlerts = async () => {
+  // 从ClickHouse获取真实告警数据
+  const fetchAlertsFromClickHouse = async () => {
     setLoading(true);
     setError(null);
     try {
-      // 先尝试从API获取
-      const response = await axios.get('/api/alerts', {
+      const response = await axios.get('/api/clickhouse/alerts', {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('sessionToken')}`
         },
         params: {
-          limit: 100,
+          limit: 200,
           offset: 0
         }
-      }).catch(err => {
-        console.log('API not available, using mock data');
-        return null;
       });
       
-      if (response && response.data && response.data.success) {
-        setAlerts(response.data.data || []);
+      if (response.data.success && response.data.alerts) {
+        // 转换ClickHouse数据格式
+        const formattedAlerts = response.data.alerts.map(alert => ({
+          id: alert.id || alert.alert_id || `ALERT-${Date.now()}-${Math.random()}`,
+          type: alert.alert_type || alert.type || 'Unknown',
+          severity: alert.severity || 5,
+          message: alert.message || alert.description || 'No description',
+          create_time: alert.create_time || alert.timestamp || new Date().toISOString(),
+          device_id: alert.device_id || alert.device_name || 'Unknown',
+          device_name: alert.device_name || alert.device_id || 'Unknown Device',
+          process_guid: alert.process_guid || '',
+          process_name: alert.process_name || alert.process_path || '',
+          ioc_hit: alert.ioc_hit || alert.ioc_id || null,
+          org_key: alert.org_key || 'default',
+          report_name: alert.report_name || ''
+        }));
+        
+        setAlerts(formattedAlerts);
+        console.log(`成功从ClickHouse加载 ${formattedAlerts.length} 条告警`);
       } else {
-        // 使用模拟数据
-        console.log('Using mock alert data');
-        const mockData = generateMockAlerts();
-        setAlerts(mockData);
+        setError('ClickHouse中暂无数据');
+        setAlerts([]);
       }
     } catch (err) {
-      console.error('Error fetching alerts:', err);
-      // 出错时也使用模拟数据
-      const mockData = generateMockAlerts();
-      setAlerts(mockData);
-      setError(null); // 清除错误，因为我们有模拟数据
+      console.error('Error fetching from ClickHouse:', err);
+      setError('无法从ClickHouse获取数据: ' + err.message);
+      setAlerts([]);
     } finally {
       setLoading(false);
     }
+  };
+
+  // 获取告警列表（兼容模式）
+  const fetchAlerts = async () => {
+    // 优先从ClickHouse获取真实数据
+    await fetchAlertsFromClickHouse();
   };
 
   // 初始化Neo4j数据库
@@ -158,27 +173,28 @@ const AlertGraphPage = () => {
     }
   };
 
-  // 导入告警到图数据库（模拟）
+  // 从ClickHouse导入告警到图数据库
   const importAlertsToGraph = async () => {
     setLoading(true);
-    setCorrelationStatus('正在生成告警关联图谱...');
+    setCorrelationStatus('正在从ClickHouse导入告警数据...');
     
     try {
-      // 模拟导入过程
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      // 先获取最新数据
+      await fetchAlertsFromClickHouse();
       
-      // 如果没有告警，先生成一些
+      // 等待数据加载
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
       if (alerts.length === 0) {
-        const mockData = generateMockAlerts();
-        setAlerts(mockData);
-        setCorrelationStatus(`成功生成 ${mockData.length} 个模拟告警`);
+        // 如果ClickHouse没有数据，提示用户
+        setCorrelationStatus('ClickHouse中暂无告警数据，请先通过Kafka导入数据');
       } else {
-        setCorrelationStatus(`成功导入 ${alerts.length} 个告警到图谱`);
-      }
-      
-      // 自动选择第一个告警
-      if (alerts.length > 0 && !selectedAlert) {
-        setSelectedAlert(alerts[0]);
+        setCorrelationStatus(`成功从ClickHouse导入 ${alerts.length} 条告警`);
+        
+        // 自动选择第一个告警
+        if (!selectedAlert && alerts.length > 0) {
+          setSelectedAlert(alerts[0]);
+        }
       }
       
       setTimeout(() => setCorrelationStatus(null), 3000);
@@ -255,7 +271,7 @@ const AlertGraphPage = () => {
         </div>
 
         <div className="control-group">
-          <label>严重程度:</label>
+          <label>威胁等级:</label>
           <select value={filterSeverity} onChange={(e) => setFilterSeverity(e.target.value)}>
             <option value="all">全部</option>
             <option value="9">严重 (9-10)</option>
@@ -281,9 +297,9 @@ const AlertGraphPage = () => {
             onClick={importAlertsToGraph} 
             disabled={loading}
             className="btn btn-import"
-            title="生成模拟告警数据并创建图谱"
+            title="从ClickHouse数据库导入真实告警数据"
           >
-            📥 生成图谱数据
+            📥 从ClickHouse导入
           </button>
           <button 
             onClick={correlateAlerts} 
@@ -302,10 +318,10 @@ const AlertGraphPage = () => {
             🎯 检测横向移动
           </button>
           <button 
-            onClick={fetchAlerts} 
+            onClick={fetchAlertsFromClickHouse} 
             disabled={loading}
             className="btn btn-refresh"
-            title="刷新告警列表"
+            title="从ClickHouse刷新最新数据"
           >
             🔄 刷新数据
           </button>
@@ -353,21 +369,21 @@ const AlertGraphPage = () => {
             <>
               <h3>告警关联图谱: {selectedAlert.id}</h3>
               <div style={{ padding: '20px' }}>
-                <SimpleAlertGraph alertId={selectedAlert.id} />
+                <SimpleAlertGraph alertId={selectedAlert.id} alertData={selectedAlert} />
               </div>
             </>
           ) : graphMode === 'all' ? (
             <>
               <h3>全部告警网络视图</h3>
               <div style={{ padding: '20px' }}>
-                <SimpleAlertGraph alertId="all-alerts" />
+                <SimpleAlertGraph alertId="all-alerts" alertData={alerts[0]} />
               </div>
             </>
           ) : graphMode === 'correlation' ? (
             <>
               <h3>关联分析视图</h3>
               <div style={{ padding: '20px' }}>
-                <SimpleAlertGraph alertId="correlation-view" />
+                <SimpleAlertGraph alertId="correlation-view" alertData={selectedAlert || alerts[0]} />
               </div>
             </>
           ) : (

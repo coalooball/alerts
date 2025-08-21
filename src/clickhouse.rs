@@ -175,6 +175,11 @@ impl ClickHouseConnection {
         Ok(Self { client, config })
     }
 
+    // Get the ClickHouse client for direct queries
+    pub fn get_client(&self) -> &Client {
+        &self.client
+    }
+
     // Helper function to clean string fields and ensure valid UTF-8
     fn clean_string(s: String) -> String {
         if s.is_empty() {

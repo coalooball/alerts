@@ -17,6 +17,7 @@ use alerts::{AlertMessage, KafkaConfig, KafkaProducer, Database, DatabaseConfig,
 use sqlx::Row;
 use alerts::kafka::config::{KafkaProducerConfig, KafkaConsumerConfig};
 use alerts::clickhouse::AlertFilters;
+use alerts::clickhouse_api::{get_clickhouse_alerts, get_alert_statistics, ClickHouseApiState, AlertsQuery};
 use uuid::Uuid;
 
 #[derive(Clone)]
@@ -170,7 +171,7 @@ struct AlertsResponse {
 }
 
 #[derive(Deserialize)]
-struct AlertsQuery {
+struct AlertFilterQuery {
     limit: Option<u32>,
     offset: Option<u32>,
     device_name: Option<String>,
@@ -559,6 +560,9 @@ async fn main() -> Result<()> {
         .route("/api/analysis/type-clustering", get(get_type_clustering))
         // Alert Data & Annotation routes
         .route("/api/alert-data", get(get_alert_data))
+        // ClickHouse alerts API routes
+        .route("/api/clickhouse/alerts", get(get_clickhouse_alerts_handler))
+        .route("/api/clickhouse/statistics", get(get_alert_statistics_handler))
         .route("/api/alert-data/:id", get(get_alert_data_detail))
         .route("/api/annotations", get(get_annotations))
         .route("/api/annotations", post(create_annotation))
@@ -1305,7 +1309,7 @@ async fn save_data_source_config(
 }
 
 async fn get_alerts(
-    Query(params): Query<AlertsQuery>,
+    Query(params): Query<AlertFilterQuery>,
     State(state): State<Arc<AppState>>,
 ) -> Result<ResponseJson<AlertsResponse>, StatusCode> {
     let limit = params.limit.unwrap_or(50);
@@ -1331,7 +1335,7 @@ async fn get_alerts(
                 date_to: params.date_to.clone(),
             };
             
-            match ch.get_common_alerts_with_filters(limit, offset, &filters).await {
+            match ch.get_common_alerts_with_filters(limit as u32, offset as u32, &filters).await {
                 Ok(alerts) => {
                     info!("Successfully retrieved {} alerts from ClickHouse", alerts.len());
                     let alerts_json: Vec<serde_json::Value> = alerts
@@ -2864,4 +2868,45 @@ async fn add_threat_event_timeline_entry(
         "message": "Timeline entry added successfully",
         "timeline_entry_id": timeline_id.to_string()
     })))
+}
+
+// Handler wrapper for get_clickhouse_alerts
+async fn get_clickhouse_alerts_handler(
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<AlertsQuery>,
+    headers: axum::http::HeaderMap,
+) -> Result<ResponseJson<serde_json::Value>, StatusCode> {
+    // Check authentication
+    let _user = check_authentication(State(state.clone()), headers).await?;
+    
+    // Wrap the state for the clickhouse_api
+    let api_state = Arc::new(ClickHouseApiState {
+        clickhouse: state.clickhouse.clone().ok_or(StatusCode::SERVICE_UNAVAILABLE)?,
+    });
+    
+    // Call the original function
+    match get_clickhouse_alerts(Query(params), State(api_state)).await {
+        Ok(Json(response)) => Ok(ResponseJson(serde_json::to_value(response).unwrap())),
+        Err(status) => Err(status),
+    }
+}
+
+// Handler wrapper for get_alert_statistics
+async fn get_alert_statistics_handler(
+    State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
+) -> Result<ResponseJson<serde_json::Value>, StatusCode> {
+    // Check authentication
+    let _user = check_authentication(State(state.clone()), headers).await?;
+    
+    // Wrap the state for the clickhouse_api
+    let api_state = Arc::new(ClickHouseApiState {
+        clickhouse: state.clickhouse.clone().ok_or(StatusCode::SERVICE_UNAVAILABLE)?,
+    });
+    
+    // Call the original function
+    match get_alert_statistics(State(api_state)).await {
+        Ok(Json(response)) => Ok(ResponseJson(response)),
+        Err(status) => Err(status),
+    }
 }

@@ -2,58 +2,85 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Network } from 'vis-network/standalone';
 import { DataSet } from 'vis-data/standalone';
 
-const SimpleAlertGraph = ({ alertId }) => {
+const SimpleAlertGraph = ({ alertId, alertData }) => {
   const containerRef = useRef(null);
   const [network, setNetwork] = useState(null);
 
   useEffect(() => {
     if (!containerRef.current) return;
 
-    // 创建简单的测试数据 - 修复文字颜色
+    // 根据威胁等级设置颜色
+    const getSeverityColor = (severity) => {
+      if (severity >= 8) return '#dc3545'; // 严重 - 红色
+      if (severity >= 6) return '#fd7e14'; // 高 - 橙色
+      if (severity >= 4) return '#ffc107'; // 中 - 黄色
+      if (severity >= 2) return '#28a745'; // 低 - 绿色
+      return '#6c757d'; // 信息 - 灰色
+    };
+
+    // 根据真实数据创建节点标签
+    const alertLabel = alertData ? 
+      `${alertData.type || alertData.alert_type}: ${(alertData.message || '').substring(0, 30)}...` : 
+      `告警: ${alertId || 'ALERT-001'}`;
+    
+    const deviceLabel = alertData?.device_name || alertData?.device_id || 'Unknown Device';
+    const processLabel = alertData?.process_name || alertData?.process_path || 'Unknown Process';
+    const iocLabel = alertData?.ioc_hit || alertData?.ioc_id || '恶意IOC';
+    
+    const alertColor = alertData ? getSeverityColor(alertData.severity || 5) : '#ff6600';
+    
     const nodes = new DataSet([
       { 
         id: 1, 
-        label: `告警: ${alertId || 'ALERT-001'}`, 
+        label: alertLabel, 
         color: {
-          background: '#ff6600',
-          border: '#cc5200',
+          background: alertColor,
+          border: alertColor,
           highlight: {
-            background: '#ff8833',
-            border: '#ff6600'
+            background: alertColor,
+            border: '#000000'
           }
         },
-        font: { color: '#000000', size: 14, face: 'arial' },
-        size: 30 
+        font: { 
+          color: alertData && alertData.severity >= 6 ? '#ffffff' : '#000000', 
+          size: 14, 
+          face: 'arial' 
+        },
+        size: 35,
+        title: alertData ? `威胁等级: ${alertData.severity}\n时间: ${alertData.create_time}` : ''
       },
       { 
         id: 2, 
-        label: '设备: WIN-SERVER', 
+        label: `设备: ${deviceLabel}`, 
         color: {
           background: '#3366cc',
           border: '#2255aa'
         },
         font: { color: '#ffffff', size: 12 },
-        size: 25 
+        size: 25,
+        title: alertData?.device_id || ''
       },
       { 
         id: 3, 
-        label: '进程: powershell.exe', 
+        label: `进程: ${processLabel}`, 
         color: {
           background: '#66cc66',
           border: '#55aa55'
         },
         font: { color: '#000000', size: 12 },
-        size: 20 
+        size: 20,
+        title: alertData?.process_path || ''
       },
       { 
         id: 4, 
-        label: 'IOC: 恶意IP', 
+        label: `IOC: ${iocLabel}`, 
         color: {
           background: '#cc3366',
           border: '#aa2255'
         },
         font: { color: '#ffffff', size: 12 },
-        size: 20 
+        size: 20,
+        title: alertData?.ioc_id || ''
       },
       { 
         id: 5, 
@@ -178,7 +205,7 @@ const SimpleAlertGraph = ({ alertId }) => {
         newNetwork.destroy();
       }
     };
-  }, [alertId]);
+  }, [alertId, alertData]);
 
   return (
     <div style={{ 
